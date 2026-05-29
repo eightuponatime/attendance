@@ -1,0 +1,8 @@
+backend/.env
+.env
+.agents
+.codex
+frontend/.agents
+frontend/.codex
+google_inst.txt
+adb.sh

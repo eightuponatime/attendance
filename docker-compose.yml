@@ -1,0 +1,62 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: attendance-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-attendance}
+      POSTGRES_USER: ${POSTGRES_USER:-attendance}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-attendance_change_me}
+    volumes:
+      - attendance_postgres_data:/var/lib/postgresql/data
+      - ./backend/migrations/001_init.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-attendance} -d ${POSTGRES_DB:-attendance}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VITE_BUSINESS_TIMEZONE: ${VITE_BUSINESS_TIMEZONE:-Asia/Almaty}
+    image: attendance-app:latest
+    container_name: attendance-app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgres://attendance:attendance_change_me@postgres:5432/attendance?sslmode=disable}
+      PORT: ${PORT:-8080}
+      ENV: ${ENV:-production}
+      BUSINESS_TIMEZONE: ${BUSINESS_TIMEZONE:-Asia/Almaty}
+      CORPORATE_DOMAIN: ${CORPORATE_DOMAIN:-goldencompass.kz}
+      SESSION_TTL: ${SESSION_TTL:-2160h}
+      FRONTEND_URL: ${FRONTEND_URL:-/}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URL: ${GOOGLE_REDIRECT_URL:-}
+      GOOGLE_ADMIN_REDIRECT_URL: ${GOOGLE_ADMIN_REDIRECT_URL:-}
+      WORKDAY_START: ${WORKDAY_START:-08:00}
+      WORKDAY_END: ${WORKDAY_END:-17:00}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-true}
+      REPORT_EMAIL_ENABLED: ${REPORT_EMAIL_ENABLED:-false}
+      REPORT_EMAIL_TIME: ${REPORT_EMAIL_TIME:-08:30}
+      HEARTBEAT_INTERVAL: ${HEARTBEAT_INTERVAL:-1m}
+      OUTAGE_THRESHOLD: ${OUTAGE_THRESHOLD:-5m}
+      OUTAGE_IMPACT_START: ${OUTAGE_IMPACT_START:-06:00}
+      OUTAGE_IMPACT_END: ${OUTAGE_IMPACT_END:-19:00}
+    ports:
+      - "127.0.0.1:${APP_HOST_PORT:-3011}:8080"
+
+volumes:
+  attendance_postgres_data:
+
