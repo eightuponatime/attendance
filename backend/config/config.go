@@ -18,6 +18,7 @@ type Config struct {
 	CorporateDomain        string
 	SessionTTL             time.Duration
 	FrontendURL            string
+	AdminFrontendURL       string
 	GoogleClientID         string
 	GoogleSecret           string
 	GoogleRedirectURL      string
@@ -51,6 +52,7 @@ func Load() (*Config, error) {
 		CorporateDomain:        getEnv("CORPORATE_DOMAIN", ""),
 		SessionTTL:             getDurationEnv("SESSION_TTL", 30*24*time.Hour),
 		FrontendURL:            getEnv("FRONTEND_URL", "/"),
+		AdminFrontendURL:       getEnv("ADMIN_FRONTEND_URL", ""),
 		GoogleClientID:         getEnv("GOOGLE_CLIENT_ID", ""),
 		GoogleSecret:           getEnv("GOOGLE_CLIENT_SECRET", ""),
 		GoogleRedirectURL:      getEnv("GOOGLE_REDIRECT_URL", ""),
@@ -119,6 +121,7 @@ func (c *Config) LogConfig(logger *zap.SugaredLogger) {
 		"corporateDomain", c.CorporateDomain,
 		"sessionTTL", c.SessionTTL.String(),
 		"frontendURL", c.FrontendURL,
+		"adminFrontendURL", c.AdminFrontendURLValue(),
 		"googleOAuthConfigured", c.GoogleClientID != "" && c.GoogleSecret != "" && c.GoogleRedirectURL != "",
 		"googleAdminOAuthConfigured", c.GoogleClientID != "" && c.GoogleSecret != "" && c.AdminRedirectURL() != "",
 		"workdayStart", c.WorkdayStart,
@@ -139,6 +142,21 @@ func (c *Config) AdminRedirectURL() string {
 	}
 
 	return strings.Replace(c.GoogleRedirectURL, "/auth/google/callback", "/auth/admin/google/callback", 1)
+}
+
+func (c *Config) AdminFrontendURLValue() string {
+	if c.AdminFrontendURL != "" {
+		return c.AdminFrontendURL
+	}
+
+	adminRedirectURL := c.AdminRedirectURL()
+	if strings.HasPrefix(adminRedirectURL, "http://") || strings.HasPrefix(adminRedirectURL, "https://") {
+		if index := strings.Index(adminRedirectURL, "/auth/"); index > 0 {
+			return adminRedirectURL[:index]
+		}
+	}
+
+	return c.FrontendURL
 }
 
 func (c *Config) SMTPConfigured() bool {

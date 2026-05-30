@@ -143,7 +143,7 @@ func (m *ReportMailer) SendLatestDueMonthlyReport(ctx context.Context) error {
 }
 
 func (m *ReportMailer) reportHTML(periodTitle string, stats adminReportStats) string {
-	adminURL := strings.TrimRight(m.cfg.FrontendURL, "/") + "/admin"
+	adminURL := strings.TrimRight(m.cfg.AdminFrontendURLValue(), "/") + "/admin"
 	return fmt.Sprintf(`<!doctype html>
 <html>
 <body style="margin:0;padding:0;background:#f3f6fa;font-family:Arial,sans-serif;color:#071026;">

@@ -36,6 +36,7 @@ services:
       CORPORATE_DOMAIN: ${CORPORATE_DOMAIN:-goldencompass.kz}
       SESSION_TTL: ${SESSION_TTL:-2160h}
       FRONTEND_URL: ${FRONTEND_URL:-/}
+      ADMIN_FRONTEND_URL: ${ADMIN_FRONTEND_URL:-}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GOOGLE_REDIRECT_URL: ${GOOGLE_REDIRECT_URL:-}
@@ -59,4 +60,3 @@ services:
 
 volumes:
   attendance_postgres_data:
-
