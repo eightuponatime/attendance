@@ -23,6 +23,7 @@ type SessionsRepository interface {
 	Create(ctx context.Context, input domain.CreateSessionInput) (*domain.Sessions, error)
 	GetValidByID(ctx context.Context, id uuid.UUID) (*domain.Sessions, error)
 	Revoke(ctx context.Context, id uuid.UUID) error
+	RevokeActiveByUserID(ctx context.Context, userId uuid.UUID) error
 }
 
 type AttendanceRepository interface {
