@@ -90,6 +90,9 @@ function AppContent() {
 
   useEffect(() => {
     const syncOnVisible = () => {
+      if (isAdminRoute) {
+        return;
+      }
       if (document.visibilityState === "visible") {
         refresh().catch((err: unknown) => setError(errorText(err)));
       }
@@ -102,7 +105,7 @@ function AppContent() {
       document.removeEventListener("visibilitychange", syncOnVisible);
       window.removeEventListener("focus", syncOnVisible);
     };
-  }, [refresh]);
+  }, [isAdminRoute, refresh]);
 
   const now = useNow();
   const screenDate = useMemo(() => buildScreenDate(now, formatDate, BUSINESS_TIME_ZONE), [formatDate, now]);

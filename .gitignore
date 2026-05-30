@@ -6,3 +6,6 @@ frontend/.agents
 frontend/.codex
 google_inst.txt
 adb.sh
+qr_maker.go
+.swo
+.swp
