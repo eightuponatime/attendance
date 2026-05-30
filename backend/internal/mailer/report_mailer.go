@@ -121,8 +121,9 @@ func (m *ReportMailer) SendLatestDueMonthlyReport(ctx context.Context) error {
 	}
 
 	stats := reportStats(employees, suspicious)
-	subject := fmt.Sprintf("HR отчет за %s", periodTitle)
-	body := m.reportHTML(periodTitle, stats)
+	displayPeriod := reportPeriodTitle(from)
+	subject := fmt.Sprintf("HR отчет за %s", displayPeriod)
+	body := m.reportHTML(displayPeriod, stats)
 
 	for _, recipient := range recipients {
 		if err := m.send(recipient, subject, body); err != nil {
@@ -145,18 +146,42 @@ func (m *ReportMailer) reportHTML(periodTitle string, stats adminReportStats) st
 	adminURL := strings.TrimRight(m.cfg.FrontendURL, "/") + "/admin"
 	return fmt.Sprintf(`<!doctype html>
 <html>
-<body style="margin:0;padding:24px;background:#f6f8fb;font-family:Arial,sans-serif;color:#0b1024;">
-  <div style="max-width:620px;margin:0 auto;background:#ffffff;border:1px solid #e5e9f1;border-radius:10px;padding:22px;">
-    <p style="margin:0 0 6px;color:#697083;font-size:13px;">Панель HR</p>
-    <h1 style="margin:0 0 18px;font-size:24px;line-height:1.2;">Сводка за %s</h1>
-    <div style="display:grid;gap:10px;margin-bottom:20px;">
-      %s
-      %s
-      %s
-      %s
-    </div>
-    <a href="%s" style="display:inline-block;padding:12px 16px;border-radius:8px;background:#113650;color:#ffffff;text-decoration:none;font-weight:700;">Открыть админ-панель</a>
-  </div>
+<body style="margin:0;padding:0;background:#f3f6fa;font-family:Arial,sans-serif;color:#071026;">
+  <table role="presentation" width="100%%" cellspacing="0" cellpadding="0" style="background:#f3f6fa;padding:28px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%%" cellspacing="0" cellpadding="0" style="max-width:640px;border-collapse:separate;border-spacing:0;">
+          <tr>
+            <td style="padding:28px 30px;border-radius:14px;background:#113650;color:#ffffff;">
+              <div style="margin:0 0 12px;color:#c6d4df;font-size:12px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;">Панель HR</div>
+              <div style="margin:0 0 10px;font-size:28px;line-height:1.2;font-weight:800;">Сводка за %s</div>
+              <div style="margin:0;color:#e5edf3;font-size:14px;line-height:1.45;">Автоматически сформированная сводка по посещаемости сотрудников.</div>
+            </td>
+          </tr>
+          <tr><td style="height:16px;"></td></tr>
+          <tr>
+            <td style="padding:22px 24px;border:1px solid #dfe7f1;border-radius:14px;background:#ffffff;">
+              <div style="margin:0 0 16px;color:#071026;font-size:21px;line-height:1.25;font-weight:800;">Ключевые показатели</div>
+              <table role="presentation" width="100%%" cellspacing="0" cellpadding="0" style="border-collapse:separate;border-spacing:0 8px;">
+                %s
+                %s
+                %s
+                %s
+              </table>
+            </td>
+          </tr>
+          <tr><td style="height:16px;"></td></tr>
+          <tr>
+            <td style="padding:22px 24px;border:1px solid #b9dcff;border-radius:14px;background:#eaf6ff;">
+              <div style="margin:0 0 10px;color:#07598f;font-size:20px;line-height:1.25;font-weight:800;">Админ-панель</div>
+              <div style="margin:0 0 18px;color:#2e5d7b;font-size:13px;line-height:1.45;">Перейдите в панель, чтобы посмотреть сотрудников, календарь, сбои сервера и детали отметок.</div>
+              <a href="%s" style="display:inline-block;padding:13px 18px;border-radius:8px;background:#113650;color:#ffffff;text-decoration:none;font-size:14px;font-weight:800;">Открыть админ-панель</a>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
 </body>
 </html>`,
 		html.EscapeString(periodTitle),
@@ -170,10 +195,31 @@ func (m *ReportMailer) reportHTML(periodTitle string, stats adminReportStats) st
 
 func statRow(label string, value int) string {
 	return fmt.Sprintf(
-		`<div style="display:flex;justify-content:space-between;gap:12px;padding:12px;border-radius:8px;background:#f6f8fb;"><span style="color:#697083;">%s</span><strong style="font-size:18px;">%d</strong></div>`,
+		`<tr>
+                  <td style="padding:13px 16px;border-radius:8px 0 0 8px;background:#f6f8fb;color:#697083;font-size:14px;">%s</td>
+                  <td align="right" style="padding:13px 16px;border-radius:0 8px 8px 0;background:#f6f8fb;color:#071026;font-size:22px;font-weight:800;">%d</td>
+                </tr>`,
 		html.EscapeString(label),
 		value,
 	)
+}
+
+func reportPeriodTitle(from time.Time) string {
+	months := [...]string{
+		"январь",
+		"февраль",
+		"март",
+		"апрель",
+		"май",
+		"июнь",
+		"июль",
+		"август",
+		"сентябрь",
+		"октябрь",
+		"ноябрь",
+		"декабрь",
+	}
+	return fmt.Sprintf("%s %d", months[int(from.Month())-1], from.Year())
 }
 
 func (m *ReportMailer) send(to string, subject string, htmlBody string) error {
