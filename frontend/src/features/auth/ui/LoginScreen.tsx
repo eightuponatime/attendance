@@ -7,10 +7,12 @@ import { LanguageSwitcher } from "../../../shared/ui/LanguageSwitcher";
 
 export function LoginScreen({
   error,
+  notice,
   admin = false,
   onAuthenticated,
 }: {
   error: string | null;
+  notice?: string | null;
   admin?: boolean;
   onAuthenticated?: () => void;
 }) {
@@ -27,6 +29,8 @@ export function LoginScreen({
   const [middleName, setMiddleName] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const googleRegistration = mode === "register" && initialAuthParams.get("auth_mode") === "register" && email !== "";
+  const noticeText = notice === "google_registration" ? t("auth.googleRegistrationNotice") : notice;
   const loginPath = admin ? "/auth/admin/google/login" : "/auth/google/login";
   const loginURL = `${loginPath}?${new URLSearchParams({
     return_to: `${window.location.pathname}${window.location.search}`,
@@ -36,7 +40,7 @@ export function LoginScreen({
     event.preventDefault();
     setFormError(null);
 
-    if (mode === "register" && password !== passwordRepeat) {
+    if (mode === "register" && !googleRegistration && password !== passwordRepeat) {
       setFormError(t("auth.passwordMismatch"));
       return;
     }
@@ -48,7 +52,7 @@ export function LoginScreen({
       } else {
         await register({
           email,
-          password,
+          password: googleRegistration ? "" : password,
           last_name: lastName,
           first_name: firstName,
           middle_name: middleName,
@@ -87,10 +91,20 @@ export function LoginScreen({
       </div>
       <Clock3 size={52} strokeWidth={2.2} />
       <h2>{t("auth.title")}</h2>
-      <p>{mode === "login" ? t("auth.loginText") : t("auth.registerText")}</p>
+      <p>{googleRegistration ? t("auth.googleRegistrationText") : mode === "login" ? t("auth.loginText") : t("auth.registerText")}</p>
+      {noticeText && !admin && <p className="auth-notice">{noticeText}</p>}
       {(error || formError) && <p className="error-banner">{formError || error}</p>}
 
       <form className="auth-form" onSubmit={handleSubmit}>
+        {googleRegistration && (
+          <div className="google-registration-card">
+            <GoogleLogo />
+            <div>
+              <span>{t("auth.googleConfirmed")}</span>
+              <strong>{email}</strong>
+            </div>
+          </div>
+        )}
         {mode === "register" && (
           <div className="auth-name-grid">
             <label>
@@ -107,28 +121,32 @@ export function LoginScreen({
             </label>
           </div>
         )}
-        <label>
-          <span>{t("auth.email")}</span>
-          <input
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            autoComplete="email"
-            required
-          />
-        </label>
-        <label>
-          <span>{t("auth.password")}</span>
-          <input
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            autoComplete={mode === "login" ? "current-password" : "new-password"}
-            minLength={6}
-            required
-          />
-        </label>
-        {mode === "register" && (
+        {!googleRegistration && (
+          <label>
+            <span>{t("auth.email")}</span>
+            <input
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              autoComplete="email"
+              required
+            />
+          </label>
+        )}
+        {!googleRegistration && (
+          <label>
+            <span>{t("auth.password")}</span>
+            <input
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              autoComplete={mode === "login" ? "current-password" : "new-password"}
+              minLength={6}
+              required
+            />
+          </label>
+        )}
+        {mode === "register" && !googleRegistration && (
           <label>
             <span>{t("auth.passwordRepeat")}</span>
             <input
@@ -146,13 +164,17 @@ export function LoginScreen({
         </button>
       </form>
 
-      <button className="auth-switch" type="button" onClick={() => setMode(mode === "login" ? "register" : "login")}>
-        {mode === "login" ? t("auth.switchToRegister") : t("auth.switchToLogin")}
-      </button>
-      <a className="google-login-link" href={loginURL}>
-        <GoogleLogo />
-        {t("auth.login")}
-      </a>
+      {!googleRegistration && (
+        <>
+          <button className="auth-switch" type="button" onClick={() => setMode(mode === "login" ? "register" : "login")}>
+            {mode === "login" ? t("auth.switchToRegister") : t("auth.switchToLogin")}
+          </button>
+          <a className="google-login-link" href={loginURL}>
+            <GoogleLogo />
+            {t("auth.login")}
+          </a>
+        </>
+      )}
     </section>
   );
 }

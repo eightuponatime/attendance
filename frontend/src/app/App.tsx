@@ -34,6 +34,7 @@ function AppContent() {
   const { formatDate, t } = useI18n();
   const isAdminRoute = window.location.pathname.startsWith("/admin");
   const [authError] = useState(() => consumeAuthErrorFromURL());
+  const [authNotice] = useState(() => consumeAuthNoticeFromURL());
   const [deviceId] = useState(() => getDeviceId());
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [adminState, setAdminState] = useState<AdminState>("unknown");
@@ -204,7 +205,7 @@ function AppContent() {
       {loadState === "loading" ? (
         <CenteredState title={t("app.loading")} text={t("app.checkingSession")} />
       ) : loadState === "guest" ? (
-        <LoginScreen error={error} admin={isAdminRoute} onAuthenticated={() => void refresh()} />
+        <LoginScreen error={error} notice={authNotice} admin={isAdminRoute} onAuthenticated={() => void refresh()} />
       ) : isAdminRoute ? (
         adminState === "checking" || adminState === "unknown" ? (
           <CenteredState title="Загрузка" text="Проверяем доступ к админ-панели" />
@@ -254,6 +255,18 @@ function consumeAuthErrorFromURL(): string | null {
   }
 
   url.searchParams.delete("auth_error");
+  window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  return message;
+}
+
+function consumeAuthNoticeFromURL(): string | null {
+  const url = new URL(window.location.href);
+  const message = url.searchParams.get("auth_notice");
+  if (!message) {
+    return null;
+  }
+
+  url.searchParams.delete("auth_notice");
   window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
   return message;
 }

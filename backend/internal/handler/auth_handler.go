@@ -630,7 +630,7 @@ func (h *AuthHandler) redirectToGoogleRegistration(w http.ResponseWriter, r *htt
 		query := parsed.Query()
 		query.Set("auth_mode", "register")
 		query.Set("email", userInfo.Email)
-		query.Set("auth_error", "Google аккаунт подтвержден. Завершите регистрацию.")
+		query.Set("auth_notice", "google_registration")
 		parsed.RawQuery = query.Encode()
 		redirectURL = parsed.String()
 	}

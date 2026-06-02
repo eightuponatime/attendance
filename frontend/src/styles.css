@@ -1039,6 +1039,49 @@ a {
   outline: 3px solid rgba(21, 63, 91, 0.12);
 }
 
+.auth-notice {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  padding: 0 12px;
+  border: 1px solid #bfe8cf;
+  border-radius: 999px;
+  color: #087332;
+  background: #effbf4;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.google-registration-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px;
+  border: 1px solid #dbe3ee;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 5px 16px rgb(13 20 40 / 0.05);
+}
+
+.google-registration-card div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  text-align: left;
+}
+
+.google-registration-card span {
+  color: #677083;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.google-registration-card strong {
+  overflow-wrap: anywhere;
+  color: #0b1024;
+  font-size: 14px;
+}
+
 .auth-form .login-link {
   width: 100%;
   cursor: pointer;

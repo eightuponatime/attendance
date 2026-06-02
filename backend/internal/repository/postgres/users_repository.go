@@ -94,7 +94,7 @@ func (r *UsersRepository) CreateLocal(
 		insert into users (
 			google_sub, email, password_hash, last_name, first_name, middle_name, full_name
 		)
-		values (nullif($1, ''), $2, $3, $4, $5, nullif($6, ''), $7)
+		values (nullif($1, ''), $2, nullif($3, ''), $4, $5, nullif($6, ''), $7)
 		returning id, google_sub, email, password_hash,
 			last_name, first_name, middle_name, full_name, created_at
 	`

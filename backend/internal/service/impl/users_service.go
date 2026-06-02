@@ -100,12 +100,16 @@ func (s *UsersService) RegisterLocal(
 		return nil, ErrEmailAlreadyExists
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(normalized.Password), bcrypt.DefaultCost)
-	if err != nil {
-		return nil, err
+	passwordHash := ""
+	if normalized.Password != "" {
+		hash, err := bcrypt.GenerateFromPassword([]byte(normalized.Password), bcrypt.DefaultCost)
+		if err != nil {
+			return nil, err
+		}
+		passwordHash = string(hash)
 	}
 
-	return s.rp.CreateLocal(ctx, normalized, string(hash), fullName)
+	return s.rp.CreateLocal(ctx, normalized, passwordHash, fullName)
 }
 
 func (s *UsersService) LoginLocal(
@@ -164,7 +168,7 @@ func normalizeLocalRegisterInput(input domain.LocalRegisterInput) (domain.LocalR
 	if _, err := mail.ParseAddress(normalized.Email); err != nil {
 		return domain.LocalRegisterInput{}, "", fmt.Errorf("%w: email is invalid", ErrInvalidLocalAuth)
 	}
-	if len([]rune(normalized.Password)) < 6 {
+	if normalized.GoogleSub == "" && len([]rune(normalized.Password)) < 6 {
 		return domain.LocalRegisterInput{}, "", fmt.Errorf("%w: password is too short", ErrInvalidLocalAuth)
 	}
 	if normalized.LastName == "" {
