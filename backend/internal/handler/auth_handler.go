@@ -186,31 +186,31 @@ func (h *AuthHandler) AdminGoogleLogin(w http.ResponseWriter, r *http.Request) {
 
 func (h *AuthHandler) GoogleCallback(w http.ResponseWriter, r *http.Request) {
 	if errMessage := r.URL.Query().Get("error"); errMessage != "" {
-		h.redirectWithOAuthError(w, r, errMessage)
+		h.redirectWithOAuthError(w, r, false, errMessage)
 		return
 	}
 
 	if !h.validOAuthState(r) {
-		h.redirectWithOAuthError(w, r, "Не удалось подтвердить вход через Google")
+		h.redirectWithOAuthError(w, r, false, "Не удалось подтвердить вход через Google")
 		return
 	}
 	http.SetCookie(w, h.expiredOAuthStateCookie())
-	redirectURL := h.frontendRedirectURL(r)
+	redirectURL := h.frontendRedirectURL(r, false)
 	http.SetCookie(w, h.expiredOAuthReturnToCookie())
 
 	code := strings.TrimSpace(r.URL.Query().Get("code"))
 	if code == "" {
-		h.redirectWithOAuthError(w, r, "Google не вернул код авторизации")
+		h.redirectWithOAuthError(w, r, false, "Google не вернул код авторизации")
 		return
 	}
 
 	userInfo, err := h.googleUserInfo(r.Context(), code, false)
 	if err != nil {
-		h.redirectWithOAuthError(w, r, "Не удалось получить профиль Google")
+		h.redirectWithOAuthError(w, r, false, "Не удалось получить профиль Google")
 		return
 	}
 	if !userInfo.EmailVerified {
-		h.redirectWithOAuthError(w, r, "Email Google не подтвержден")
+		h.redirectWithOAuthError(w, r, false, "Email Google не подтвержден")
 		return
 	}
 
@@ -221,15 +221,15 @@ func (h *AuthHandler) GoogleCallback(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if errors.Is(err, impl.ErrInvalidCredentials) {
-			h.redirectWithOAuthError(w, r, "Сначала зарегистрируйтесь по email и паролю")
+			h.redirectWithOAuthError(w, r, false, "Сначала зарегистрируйтесь по email и паролю")
 			return
 		}
-		h.redirectWithOAuthError(w, r, "Не удалось войти через Google")
+		h.redirectWithOAuthError(w, r, false, "Не удалось войти через Google")
 		return
 	}
 
 	if !h.startUserSession(w, r, user) {
-		h.redirectWithOAuthError(w, r, "Не удалось создать сессию")
+		h.redirectWithOAuthError(w, r, false, "Не удалось создать сессию")
 		return
 	}
 	http.Redirect(w, r, redirectURL, http.StatusFound)
@@ -237,28 +237,28 @@ func (h *AuthHandler) GoogleCallback(w http.ResponseWriter, r *http.Request) {
 
 func (h *AuthHandler) AdminGoogleCallback(w http.ResponseWriter, r *http.Request) {
 	if errMessage := r.URL.Query().Get("error"); errMessage != "" {
-		h.redirectWithOAuthError(w, r, errMessage)
+		h.redirectWithOAuthError(w, r, true, errMessage)
 		return
 	}
 
 	if !h.validOAuthState(r) {
-		h.redirectWithOAuthError(w, r, "Не удалось подтвердить вход через Google")
+		h.redirectWithOAuthError(w, r, true, "Не удалось подтвердить вход через Google")
 		return
 	}
 	http.SetCookie(w, h.expiredOAuthStateCookie())
-	redirectURL := h.frontendRedirectURL(r)
+	redirectURL := h.frontendRedirectURL(r, true)
 	http.SetCookie(w, h.expiredOAuthReturnToCookie())
 
 	code := strings.TrimSpace(r.URL.Query().Get("code"))
 	if code == "" {
-		h.redirectWithOAuthError(w, r, "Google не вернул код авторизации")
+		h.redirectWithOAuthError(w, r, true, "Google не вернул код авторизации")
 		return
 	}
 
 	userInfo, err := h.googleUserInfo(r.Context(), code, true)
 	if err != nil {
 		log.Printf("admin google oauth: failed to get profile: %v", err)
-		h.redirectWithOAuthError(w, r, "Не удалось получить профиль Google")
+		h.redirectWithOAuthError(w, r, true, "Не удалось получить профиль Google")
 		return
 	}
 	log.Printf(
@@ -270,7 +270,7 @@ func (h *AuthHandler) AdminGoogleCallback(w http.ResponseWriter, r *http.Request
 	)
 	if !userInfo.EmailVerified {
 		log.Printf("admin google oauth: email is not verified: email=%q", userInfo.Email)
-		h.redirectWithOAuthError(w, r, "Email Google не подтвержден")
+		h.redirectWithOAuthError(w, r, true, "Email Google не подтвержден")
 		return
 	}
 
@@ -281,7 +281,7 @@ func (h *AuthHandler) AdminGoogleCallback(w http.ResponseWriter, r *http.Request
 	})
 	if err != nil {
 		log.Printf("admin google oauth: failed to create admin session for email=%q: %v", userInfo.Email, err)
-		h.redirectWithOAuthError(w, r, "Этот Google аккаунт не имеет доступа к админ-панели")
+		h.redirectWithOAuthError(w, r, true, "Этот Google аккаунт не имеет доступа к админ-панели")
 		return
 	}
 
@@ -507,17 +507,22 @@ func (h *AuthHandler) expiredOAuthReturnToCookie() *http.Cookie {
 	}
 }
 
-func (h *AuthHandler) frontendRedirectURL(r *http.Request) string {
-	cookie, err := r.Cookie(googleOAuthReturnToCookie)
-	if err != nil || cookie.Value == "" {
-		return h.cfg.FrontendURL
+func (h *AuthHandler) frontendRedirectURL(r *http.Request, admin bool) string {
+	baseURL := h.cfg.FrontendURL
+	if admin {
+		baseURL = h.cfg.AdminFrontendURLValue()
 	}
 
-	return strings.TrimRight(h.cfg.FrontendURL, "/") + safeReturnTo(cookie.Value)
+	cookie, err := r.Cookie(googleOAuthReturnToCookie)
+	if err != nil || cookie.Value == "" {
+		return baseURL
+	}
+
+	return strings.TrimRight(baseURL, "/") + safeReturnTo(cookie.Value)
 }
 
-func (h *AuthHandler) redirectWithOAuthError(w http.ResponseWriter, r *http.Request, message string) {
-	redirectURL := h.frontendRedirectURL(r)
+func (h *AuthHandler) redirectWithOAuthError(w http.ResponseWriter, r *http.Request, admin bool, message string) {
+	redirectURL := h.frontendRedirectURL(r, admin)
 	parsed, err := url.Parse(redirectURL)
 	if err == nil {
 		query := parsed.Query()
