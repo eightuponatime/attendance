@@ -2,7 +2,9 @@ package handler
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -25,6 +27,7 @@ import (
 const (
 	googleOAuthStateCookie    = "google_oauth_state"
 	googleOAuthReturnToCookie = "google_oauth_return_to"
+	googleOAuthPendingCookie  = "google_oauth_pending"
 )
 
 type AuthHandler struct {
@@ -62,6 +65,13 @@ type localLoginRequest struct {
 	Password string `json:"password"`
 }
 
+type pendingGoogleRegistration struct {
+	GoogleSub string `json:"google_sub"`
+	Email     string `json:"email"`
+	ExpiresAt int64  `json:"expires_at"`
+	Signature string `json:"signature"`
+}
+
 func NewAuthHandler(
 	cfg *config.Config,
 	usersService service.UsersService,
@@ -92,12 +102,19 @@ func (h *AuthHandler) RegisterLocal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	pendingGoogle := h.pendingGoogleRegistrationFromCookie(r)
+	googleSub := ""
+	if pendingGoogle != nil && strings.EqualFold(strings.TrimSpace(request.Email), pendingGoogle.Email) {
+		googleSub = pendingGoogle.GoogleSub
+	}
+
 	user, err := h.usersService.RegisterLocal(r.Context(), domain.LocalRegisterInput{
 		Email:      request.Email,
 		Password:   request.Password,
 		LastName:   request.LastName,
 		FirstName:  request.FirstName,
 		MiddleName: request.MiddleName,
+		GoogleSub:  googleSub,
 	})
 	if err != nil {
 		h.writeAuthError(w, err)
@@ -107,6 +124,9 @@ func (h *AuthHandler) RegisterLocal(w http.ResponseWriter, r *http.Request) {
 	if !h.startUserSession(w, r, user) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create session"})
 		return
+	}
+	if googleSub != "" {
+		http.SetCookie(w, h.expiredPendingGoogleRegistrationCookie())
 	}
 	writeJSON(w, http.StatusOK, newUserResponse(user))
 }
@@ -231,7 +251,7 @@ func (h *AuthHandler) GoogleCallback(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("google oauth: failed to find or link user for email=%q: %v", userInfo.Email, err)
 		if errors.Is(err, impl.ErrInvalidCredentials) {
-			h.redirectWithOAuthError(w, r, false, "Сначала зарегистрируйтесь по email и паролю")
+			h.redirectToGoogleRegistration(w, r, userInfo)
 			return
 		}
 		h.redirectWithOAuthError(w, r, false, "Не удалось войти через Google")
@@ -517,6 +537,78 @@ func (h *AuthHandler) expiredOAuthReturnToCookie() *http.Cookie {
 	}
 }
 
+func (h *AuthHandler) newPendingGoogleRegistrationCookie(userInfo *googleUserInfo) *http.Cookie {
+	expiresAt := time.Now().UTC().Add(10 * time.Minute).Unix()
+	pending := pendingGoogleRegistration{
+		GoogleSub: strings.TrimSpace(userInfo.Sub),
+		Email:     strings.ToLower(strings.TrimSpace(userInfo.Email)),
+		ExpiresAt: expiresAt,
+	}
+	pending.Signature = h.pendingGoogleSignature(pending.GoogleSub, pending.Email, pending.ExpiresAt)
+
+	raw, _ := json.Marshal(pending)
+	return &http.Cookie{
+		Name:     googleOAuthPendingCookie,
+		Value:    base64.RawURLEncoding.EncodeToString(raw),
+		Path:     "/auth",
+		MaxAge:   int((10 * time.Minute).Seconds()),
+		Expires:  time.Unix(expiresAt, 0).UTC(),
+		HttpOnly: true,
+		Secure:   h.cfg.Env != "development",
+		SameSite: http.SameSiteLaxMode,
+	}
+}
+
+func (h *AuthHandler) expiredPendingGoogleRegistrationCookie() *http.Cookie {
+	return &http.Cookie{
+		Name:     googleOAuthPendingCookie,
+		Value:    "",
+		Path:     "/auth",
+		MaxAge:   -1,
+		Expires:  time.Unix(0, 0).UTC(),
+		HttpOnly: true,
+		Secure:   h.cfg.Env != "development",
+		SameSite: http.SameSiteLaxMode,
+	}
+}
+
+func (h *AuthHandler) pendingGoogleRegistrationFromCookie(r *http.Request) *pendingGoogleRegistration {
+	cookie, err := r.Cookie(googleOAuthPendingCookie)
+	if err != nil || cookie.Value == "" {
+		return nil
+	}
+
+	raw, err := base64.RawURLEncoding.DecodeString(cookie.Value)
+	if err != nil {
+		return nil
+	}
+
+	var pending pendingGoogleRegistration
+	if err := json.Unmarshal(raw, &pending); err != nil {
+		return nil
+	}
+	if pending.GoogleSub == "" || pending.Email == "" || pending.ExpiresAt < time.Now().UTC().Unix() {
+		return nil
+	}
+
+	expected := h.pendingGoogleSignature(pending.GoogleSub, pending.Email, pending.ExpiresAt)
+	if !hmac.Equal([]byte(expected), []byte(pending.Signature)) {
+		return nil
+	}
+
+	return &pending
+}
+
+func (h *AuthHandler) pendingGoogleSignature(googleSub string, email string, expiresAt int64) string {
+	mac := hmac.New(sha256.New, []byte(h.cfg.GoogleSecret))
+	mac.Write([]byte(googleSub))
+	mac.Write([]byte{0})
+	mac.Write([]byte(email))
+	mac.Write([]byte{0})
+	mac.Write([]byte(fmt.Sprintf("%d", expiresAt)))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
 func (h *AuthHandler) frontendRedirectURL(r *http.Request, admin bool) string {
 	baseURL := h.cfg.FrontendURL
 	if admin {
@@ -529,6 +621,24 @@ func (h *AuthHandler) frontendRedirectURL(r *http.Request, admin bool) string {
 	}
 
 	return strings.TrimRight(baseURL, "/") + safeReturnTo(cookie.Value)
+}
+
+func (h *AuthHandler) redirectToGoogleRegistration(w http.ResponseWriter, r *http.Request, userInfo *googleUserInfo) {
+	redirectURL := h.frontendRedirectURL(r, false)
+	parsed, err := url.Parse(redirectURL)
+	if err == nil {
+		query := parsed.Query()
+		query.Set("auth_mode", "register")
+		query.Set("email", userInfo.Email)
+		query.Set("auth_error", "Google аккаунт подтвержден. Завершите регистрацию.")
+		parsed.RawQuery = query.Encode()
+		redirectURL = parsed.String()
+	}
+
+	http.SetCookie(w, h.newPendingGoogleRegistrationCookie(userInfo))
+	http.SetCookie(w, h.expiredOAuthStateCookie())
+	http.SetCookie(w, h.expiredOAuthReturnToCookie())
+	http.Redirect(w, r, redirectURL, http.StatusFound)
 }
 
 func (h *AuthHandler) redirectWithOAuthError(w http.ResponseWriter, r *http.Request, admin bool, message string) {

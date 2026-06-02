@@ -158,6 +158,7 @@ func normalizeLocalRegisterInput(input domain.LocalRegisterInput) (domain.LocalR
 		LastName:   normalizeNamePart(input.LastName),
 		FirstName:  normalizeNamePart(input.FirstName),
 		MiddleName: normalizeNamePart(input.MiddleName),
+		GoogleSub:  strings.TrimSpace(input.GoogleSub),
 	}
 
 	if _, err := mail.ParseAddress(normalized.Email); err != nil {

@@ -30,6 +30,7 @@ type LocalRegisterInput struct {
 	LastName   string
 	FirstName  string
 	MiddleName string
+	GoogleSub  string
 }
 
 type LocalLoginInput struct {

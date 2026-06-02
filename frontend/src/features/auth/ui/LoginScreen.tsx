@@ -15,8 +15,11 @@ export function LoginScreen({
   onAuthenticated?: () => void;
 }) {
   const { t } = useI18n();
-  const [mode, setMode] = useState<"login" | "register">("login");
-  const [email, setEmail] = useState("");
+  const initialAuthParams = new URL(window.location.href).searchParams;
+  const [mode, setMode] = useState<"login" | "register">(
+    initialAuthParams.get("auth_mode") === "register" ? "register" : "login",
+  );
+  const [email, setEmail] = useState(initialAuthParams.get("email") ?? "");
   const [password, setPassword] = useState("");
   const [passwordRepeat, setPasswordRepeat] = useState("");
   const [lastName, setLastName] = useState("");

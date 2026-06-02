@@ -92,9 +92,9 @@ func (r *UsersRepository) CreateLocal(
 ) (*domain.Users, error) {
 	const query = `
 		insert into users (
-			email, password_hash, last_name, first_name, middle_name, full_name
+			google_sub, email, password_hash, last_name, first_name, middle_name, full_name
 		)
-		values ($1, $2, $3, $4, nullif($5, ''), $6)
+		values (nullif($1, ''), $2, $3, $4, $5, nullif($6, ''), $7)
 		returning id, google_sub, email, password_hash,
 			last_name, first_name, middle_name, full_name, created_at
 	`
@@ -106,6 +106,7 @@ func (r *UsersRepository) CreateLocal(
 		q,
 		&user,
 		query,
+		input.GoogleSub,
 		input.Email,
 		passwordHash,
 		input.LastName,
