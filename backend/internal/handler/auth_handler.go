@@ -206,10 +206,19 @@ func (h *AuthHandler) GoogleCallback(w http.ResponseWriter, r *http.Request) {
 
 	userInfo, err := h.googleUserInfo(r.Context(), code, false)
 	if err != nil {
+		log.Printf("google oauth: failed to get profile: %v", err)
 		h.redirectWithOAuthError(w, r, false, "Не удалось получить профиль Google")
 		return
 	}
+	log.Printf(
+		"google oauth: userinfo sub=%q email=%q email_verified=%t name=%q",
+		userInfo.Sub,
+		userInfo.Email,
+		userInfo.EmailVerified,
+		userInfo.Name,
+	)
 	if !userInfo.EmailVerified {
+		log.Printf("google oauth: email is not verified: email=%q", userInfo.Email)
 		h.redirectWithOAuthError(w, r, false, "Email Google не подтвержден")
 		return
 	}
@@ -220,6 +229,7 @@ func (h *AuthHandler) GoogleCallback(w http.ResponseWriter, r *http.Request) {
 		FullName:  userInfo.Name,
 	})
 	if err != nil {
+		log.Printf("google oauth: failed to find or link user for email=%q: %v", userInfo.Email, err)
 		if errors.Is(err, impl.ErrInvalidCredentials) {
 			h.redirectWithOAuthError(w, r, false, "Сначала зарегистрируйтесь по email и паролю")
 			return
