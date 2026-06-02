@@ -16,7 +16,9 @@ type TransactionManager interface {
 type UsersRepository interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.Users, error)
 	GetByGoogleSub(ctx context.Context, googleSub string) (*domain.Users, error)
-	CreateOrUpdateFromGoogle(ctx context.Context, input domain.GoogleUserInput) (*domain.Users, error)
+	GetByEmail(ctx context.Context, email string) (*domain.Users, error)
+	CreateLocal(ctx context.Context, input domain.LocalRegisterInput, passwordHash string, fullName string) (*domain.Users, error)
+	LinkGoogleSub(ctx context.Context, userId uuid.UUID, googleSub string) (*domain.Users, error)
 }
 
 type SessionsRepository interface {

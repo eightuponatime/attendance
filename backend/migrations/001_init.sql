@@ -1,10 +1,13 @@
 create extension if not exists "uuid-ossp";
 
--- google_sub is a stable unique identifier from Google Workspace
 create table users (
     id uuid primary key default uuid_generate_v4(),
-    google_sub text not null unique,
+    google_sub text unique,
     email text not null unique,
+    password_hash text,
+    last_name text not null,
+    first_name text not null,
+    middle_name text,
     full_name text not null,
     created_at timestamptz not null default now()
 );

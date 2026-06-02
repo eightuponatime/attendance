@@ -17,6 +17,7 @@ import (
 	"attendance/internal/domain"
 	appMiddleware "attendance/internal/middleware"
 	"attendance/internal/service"
+	impl "attendance/internal/service/impl"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -48,6 +49,19 @@ type googleUserInfo struct {
 	Name          string `json:"name"`
 }
 
+type localRegisterRequest struct {
+	Email      string `json:"email"`
+	Password   string `json:"password"`
+	LastName   string `json:"last_name"`
+	FirstName  string `json:"first_name"`
+	MiddleName string `json:"middle_name"`
+}
+
+type localLoginRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
 func NewAuthHandler(
 	cfg *config.Config,
 	usersService service.UsersService,
@@ -63,10 +77,61 @@ func NewAuthHandler(
 }
 
 func (h *AuthHandler) RegisterPublicRoutes(r chi.Router) {
+	r.Post("/register", h.RegisterLocal)
+	r.Post("/login", h.LoginLocal)
 	r.Get("/google/login", h.GoogleLogin)
 	r.Get("/google/callback", h.GoogleCallback)
 	r.Get("/admin/google/login", h.AdminGoogleLogin)
 	r.Get("/admin/google/callback", h.AdminGoogleCallback)
+}
+
+func (h *AuthHandler) RegisterLocal(w http.ResponseWriter, r *http.Request) {
+	var request localRegisterRequest
+	if err := readJSON(r, &request); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+
+	user, err := h.usersService.RegisterLocal(r.Context(), domain.LocalRegisterInput{
+		Email:      request.Email,
+		Password:   request.Password,
+		LastName:   request.LastName,
+		FirstName:  request.FirstName,
+		MiddleName: request.MiddleName,
+	})
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+
+	if !h.startUserSession(w, r, user) {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create session"})
+		return
+	}
+	writeJSON(w, http.StatusOK, newUserResponse(user))
+}
+
+func (h *AuthHandler) LoginLocal(w http.ResponseWriter, r *http.Request) {
+	var request localLoginRequest
+	if err := readJSON(r, &request); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+
+	user, err := h.usersService.LoginLocal(r.Context(), domain.LocalLoginInput{
+		Email:    request.Email,
+		Password: request.Password,
+	})
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+
+	if !h.startUserSession(w, r, user) {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create session"})
+		return
+	}
+	writeJSON(w, http.StatusOK, newUserResponse(user))
 }
 
 func (h *AuthHandler) RegisterProtectedRoutes(r chi.Router) {
@@ -155,17 +220,18 @@ func (h *AuthHandler) GoogleCallback(w http.ResponseWriter, r *http.Request) {
 		FullName:  userInfo.Name,
 	})
 	if err != nil {
-		h.redirectWithOAuthError(w, r, "Этот Google аккаунт не разрешен для входа")
+		if errors.Is(err, impl.ErrInvalidCredentials) {
+			h.redirectWithOAuthError(w, r, "Сначала зарегистрируйтесь по email и паролю")
+			return
+		}
+		h.redirectWithOAuthError(w, r, "Не удалось войти через Google")
 		return
 	}
 
-	session, err := h.sessionsService.Create(r.Context(), user.Id)
-	if err != nil {
+	if !h.startUserSession(w, r, user) {
 		h.redirectWithOAuthError(w, r, "Не удалось создать сессию")
 		return
 	}
-
-	http.SetCookie(w, appMiddleware.NewSessionCookie(h.cfg, session.Id))
 	http.Redirect(w, r, redirectURL, http.StatusFound)
 }
 
@@ -245,6 +311,29 @@ func (h *AuthHandler) AdminLogout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status": "ok",
 	})
+}
+
+func (h *AuthHandler) startUserSession(w http.ResponseWriter, r *http.Request, user *domain.Users) bool {
+	session, err := h.sessionsService.Create(r.Context(), user.Id)
+	if err != nil {
+		return false
+	}
+
+	http.SetCookie(w, appMiddleware.NewSessionCookie(h.cfg, session.Id))
+	return true
+}
+
+func (h *AuthHandler) writeAuthError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, impl.ErrEmailAlreadyExists):
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "email already registered"})
+	case errors.Is(err, impl.ErrInvalidCredentials):
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
+	case errors.Is(err, impl.ErrInvalidLocalAuth):
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+	default:
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "auth failed"})
+	}
 }
 
 func (h *AuthHandler) googleAuthURL(state string, admin bool) string {

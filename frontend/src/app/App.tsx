@@ -204,7 +204,7 @@ function AppContent() {
       {loadState === "loading" ? (
         <CenteredState title={t("app.loading")} text={t("app.checkingSession")} />
       ) : loadState === "guest" ? (
-        <LoginScreen error={error} admin={isAdminRoute} />
+        <LoginScreen error={error} admin={isAdminRoute} onAuthenticated={() => void refresh()} />
       ) : isAdminRoute ? (
         adminState === "checking" || adminState === "unknown" ? (
           <CenteredState title="Загрузка" text="Проверяем доступ к админ-панели" />

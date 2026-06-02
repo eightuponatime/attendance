@@ -4,12 +4,15 @@
 -- and deliberate device/IP overlaps for suspicious activity checks.
 -- Existing kitchen@goldencompass.kz is not inserted into users here; its known user_id is reused.
 
-with user_seed (id, google_sub, email, full_name, created_at) as (
+with user_seed (id, google_sub, email, last_name, first_name, middle_name, full_name, created_at) as (
     values
         (
             '0c450c7f-9cf0-4323-87f0-d3bfbd332a41'::uuid,
             'demo-google-sub-kurban',
             'kurban@goldencompass.kz',
+            'Курбан',
+            'Администратор',
+            null,
             'Курбан Администратор',
             '2026-04-01 09:00:00+05'::timestamptz
         ),
@@ -17,6 +20,9 @@ with user_seed (id, google_sub, email, full_name, created_at) as (
             '86f9d985-31d2-40e2-b466-706566bff629'::uuid,
             'demo-google-sub-solovyov',
             'a.solovyov@goldencompass.kz',
+            'Соловьев',
+            'Алексей',
+            null,
             'Алексей Соловьев',
             '2026-04-01 09:05:00+05'::timestamptz
         ),
@@ -24,6 +30,9 @@ with user_seed (id, google_sub, email, full_name, created_at) as (
             'e912e9d0-a2ab-48cf-bd0a-b04cd54ca8ff'::uuid,
             'demo-google-sub-madina',
             'madina@goldencompass.kz',
+            'Ахметова',
+            'Мадина',
+            null,
             'Мадина Ахметова',
             '2026-04-02 09:10:00+05'::timestamptz
         ),
@@ -31,16 +40,22 @@ with user_seed (id, google_sub, email, full_name, created_at) as (
             'f5c7f36b-39e8-4ee4-bc37-b54a29f5426a'::uuid,
             'demo-google-sub-timur',
             'timur@goldencompass.kz',
+            'Ибраев',
+            'Тимур',
+            null,
             'Тимур Ибраев',
             '2026-04-02 09:15:00+05'::timestamptz
         )
 )
-insert into users (id, google_sub, email, full_name, created_at)
-select id, google_sub, email, full_name, created_at
+insert into users (id, google_sub, email, last_name, first_name, middle_name, full_name, created_at)
+select id, google_sub, email, last_name, first_name, middle_name, full_name, created_at
 from user_seed
 on conflict (id) do update set
     google_sub = excluded.google_sub,
     email = excluded.email,
+    last_name = excluded.last_name,
+    first_name = excluded.first_name,
+    middle_name = excluded.middle_name,
     full_name = excluded.full_name;
 
 insert into admin_access (email)

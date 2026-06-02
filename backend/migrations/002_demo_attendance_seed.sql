@@ -4,17 +4,32 @@
 --
 -- Safe to run multiple times: records/events are upserted.
 
-insert into users (id, google_sub, email, full_name, created_at)
+insert into users (
+    id,
+    google_sub,
+    email,
+    last_name,
+    first_name,
+    middle_name,
+    full_name,
+    created_at
+)
 values (
     '561a0ae5-679e-4643-a7c4-bf451ace46b4',
     '103609409226151733153',
     'kitchen@goldencompass.kz',
+    'Столовая',
+    'Отчеты по столовой',
+    null,
     'Столовая Отчеты по столовой',
     '2026-05-16 17:41:05.722+05'
 )
 on conflict (id) do update set
     google_sub = excluded.google_sub,
     email = excluded.email,
+    last_name = excluded.last_name,
+    first_name = excluded.first_name,
+    middle_name = excluded.middle_name,
     full_name = excluded.full_name;
 
 with seed (

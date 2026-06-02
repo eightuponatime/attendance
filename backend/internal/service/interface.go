@@ -11,6 +11,8 @@ import (
 
 type UsersService interface {
 	FindOrCreateFromGoogle(ctx context.Context, input domain.GoogleUserInput) (*domain.Users, error)
+	RegisterLocal(ctx context.Context, input domain.LocalRegisterInput) (*domain.Users, error)
+	LoginLocal(ctx context.Context, input domain.LocalLoginInput) (*domain.Users, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.Users, error)
 	GetByGoogleSub(ctx context.Context, googleSub string) (*domain.Users, error)
 }

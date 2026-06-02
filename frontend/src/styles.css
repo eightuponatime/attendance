@@ -997,6 +997,65 @@ a {
   text-decoration: none;
 }
 
+.auth-form {
+  display: grid;
+  width: min(100%, 360px);
+  gap: 12px;
+}
+
+.auth-form label,
+.auth-name-grid {
+  display: grid;
+  gap: 7px;
+  text-align: left;
+}
+
+.auth-form span {
+  color: #677083;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.auth-form input {
+  width: 100%;
+  min-height: 46px;
+  border: 1px solid #dbe3ee;
+  border-radius: 8px;
+  padding: 0 13px;
+  color: #0b1024;
+  background: #ffffff;
+  font: inherit;
+}
+
+.auth-form input:focus {
+  border-color: #153f5b;
+  outline: 3px solid rgba(21, 63, 91, 0.12);
+}
+
+.auth-form .login-link {
+  width: 100%;
+  cursor: pointer;
+}
+
+.auth-form .login-link:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+
+.auth-switch,
+.auth-google-link {
+  border: 0;
+  color: #153f5b;
+  background: transparent;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.auth-switch {
+  cursor: pointer;
+}
+
 .profile-card {
   display: grid;
   justify-items: center;
