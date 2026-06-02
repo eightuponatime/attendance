@@ -961,11 +961,18 @@ a {
 .login-screen,
 .centered-state {
   display: grid;
+  position: relative;
   min-height: 55vh;
   place-items: center;
   align-content: center;
   gap: 15px;
   text-align: center;
+}
+
+.auth-language {
+  position: absolute;
+  top: 0;
+  right: 0;
 }
 
 .login-screen h2,
@@ -1054,6 +1061,28 @@ a {
 
 .auth-switch {
   cursor: pointer;
+}
+
+.google-login-link {
+  display: inline-flex;
+  min-height: 46px;
+  align-items: center;
+  justify-content: center;
+  gap: 11px;
+  padding: 0 18px;
+  border: 1px solid #dbe3ee;
+  border-radius: 8px;
+  color: #172033;
+  background: #ffffff;
+  box-shadow: 0 5px 16px rgb(13 20 40 / 0.06);
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.google-logo {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
 }
 
 .profile-card {
