@@ -1106,6 +1106,12 @@ a {
   cursor: pointer;
 }
 
+.auth-alt-actions {
+  display: grid;
+  gap: 9px;
+  justify-items: center;
+}
+
 .google-login-link {
   display: inline-flex;
   min-height: 46px;

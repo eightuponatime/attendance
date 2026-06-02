@@ -18,8 +18,9 @@ export function LoginScreen({
 }) {
   const { t } = useI18n();
   const initialAuthParams = new URL(window.location.href).searchParams;
+  const initialGoogleRegistration = initialAuthParams.get("auth_mode") === "register" && initialAuthParams.get("email") !== null;
   const [mode, setMode] = useState<"login" | "register">(
-    initialAuthParams.get("auth_mode") === "register" ? "register" : "login",
+    initialGoogleRegistration ? "register" : "login",
   );
   const [email, setEmail] = useState(initialAuthParams.get("email") ?? "");
   const [password, setPassword] = useState("");
@@ -29,7 +30,8 @@ export function LoginScreen({
   const [middleName, setMiddleName] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const googleRegistration = mode === "register" && initialAuthParams.get("auth_mode") === "register" && email !== "";
+  const [googleRegistrationActive, setGoogleRegistrationActive] = useState(initialGoogleRegistration);
+  const googleRegistration = mode === "register" && googleRegistrationActive && email !== "";
   const noticeText = notice === "google_registration" ? t("auth.googleRegistrationNotice") : notice;
   const loginPath = admin ? "/auth/admin/google/login" : "/auth/google/login";
   const loginURL = `${loginPath}?${new URLSearchParams({
@@ -66,6 +68,24 @@ export function LoginScreen({
     }
   }
 
+  function leaveGoogleRegistration(nextMode: "login" | "register") {
+    const url = new URL(window.location.href);
+    url.searchParams.delete("auth_mode");
+    url.searchParams.delete("auth_notice");
+    url.searchParams.delete("auth_error");
+    if (nextMode === "login") {
+      url.searchParams.delete("email");
+      setEmail("");
+    }
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+
+    setGoogleRegistrationActive(false);
+    setMode(nextMode);
+    setPassword("");
+    setPasswordRepeat("");
+    setFormError(null);
+  }
+
   if (admin) {
     return (
       <section className="login-screen">
@@ -92,7 +112,7 @@ export function LoginScreen({
       <Clock3 size={52} strokeWidth={2.2} />
       <h2>{t("auth.title")}</h2>
       <p>{googleRegistration ? t("auth.googleRegistrationText") : mode === "login" ? t("auth.loginText") : t("auth.registerText")}</p>
-      {noticeText && !admin && <p className="auth-notice">{noticeText}</p>}
+      {noticeText && googleRegistration && <p className="auth-notice">{noticeText}</p>}
       {(error || formError) && <p className="error-banner">{formError || error}</p>}
 
       <form className="auth-form" onSubmit={handleSubmit}>
@@ -174,6 +194,16 @@ export function LoginScreen({
             {t("auth.login")}
           </a>
         </>
+      )}
+      {googleRegistration && (
+        <div className="auth-alt-actions">
+          <button className="auth-switch" type="button" onClick={() => leaveGoogleRegistration("register")}>
+            {t("auth.registerWithPassword")}
+          </button>
+          <button className="auth-switch" type="button" onClick={() => leaveGoogleRegistration("login")}>
+            {t("auth.backToLogin")}
+          </button>
+        </div>
       )}
     </section>
   );
