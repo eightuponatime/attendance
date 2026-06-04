@@ -1034,9 +1034,50 @@ a {
   font: inherit;
 }
 
+.password-field {
+  display: grid;
+  grid-template-columns: 1fr 44px;
+  align-items: stretch;
+  min-height: 46px;
+  border: 1px solid #dbe3ee;
+  border-radius: 8px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.password-field input {
+  min-height: 44px;
+  border: 0;
+  border-radius: 0;
+}
+
+.password-field button {
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-left: 1px solid #eef2f7;
+  color: #637083;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.password-field:focus-within {
+  border-color: #153f5b;
+  outline: 3px solid rgba(21, 63, 91, 0.12);
+}
+
+.password-field input:focus {
+  outline: 0;
+}
+
 .auth-form input:focus {
   border-color: #153f5b;
   outline: 3px solid rgba(21, 63, 91, 0.12);
+}
+
+.password-field input:focus {
+  border-color: transparent;
+  outline: 0;
 }
 
 .auth-notice {

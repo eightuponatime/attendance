@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
-import { Clock3 } from "lucide-react";
+import { Clock3, Eye, EyeOff } from "lucide-react";
 import { login, register } from "../api/authApi";
 import { useI18n } from "../../../shared/i18n/i18n";
 import { LanguageSwitcher } from "../../../shared/ui/LanguageSwitcher";
@@ -25,6 +25,8 @@ export function LoginScreen({
   const [email, setEmail] = useState(initialAuthParams.get("email") ?? "");
   const [password, setPassword] = useState("");
   const [passwordRepeat, setPasswordRepeat] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showPasswordRepeat, setShowPasswordRepeat] = useState(false);
   const [lastName, setLastName] = useState("");
   const [firstName, setFirstName] = useState("");
   const [middleName, setMiddleName] = useState("");
@@ -156,27 +158,47 @@ export function LoginScreen({
         {!googleRegistration && (
           <label>
             <span>{t("auth.password")}</span>
-            <input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              autoComplete={mode === "login" ? "current-password" : "new-password"}
-              minLength={6}
-              required
-            />
+            <div className="password-field">
+              <input
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                autoComplete={mode === "login" ? "current-password" : "new-password"}
+                minLength={6}
+                required
+              />
+              <button
+                type="button"
+                aria-label={showPassword ? t("auth.hidePassword") : t("auth.showPassword")}
+                title={showPassword ? t("auth.hidePassword") : t("auth.showPassword")}
+                onClick={() => setShowPassword((value) => !value)}
+              >
+                {showPassword ? <EyeOff size={19} /> : <Eye size={19} />}
+              </button>
+            </div>
           </label>
         )}
         {mode === "register" && !googleRegistration && (
           <label>
             <span>{t("auth.passwordRepeat")}</span>
-            <input
-              type="password"
-              value={passwordRepeat}
-              onChange={(event) => setPasswordRepeat(event.target.value)}
-              autoComplete="new-password"
-              minLength={6}
-              required
-            />
+            <div className="password-field">
+              <input
+                type={showPasswordRepeat ? "text" : "password"}
+                value={passwordRepeat}
+                onChange={(event) => setPasswordRepeat(event.target.value)}
+                autoComplete="new-password"
+                minLength={6}
+                required
+              />
+              <button
+                type="button"
+                aria-label={showPasswordRepeat ? t("auth.hidePassword") : t("auth.showPassword")}
+                title={showPasswordRepeat ? t("auth.hidePassword") : t("auth.showPassword")}
+                onClick={() => setShowPasswordRepeat((value) => !value)}
+              >
+                {showPasswordRepeat ? <EyeOff size={19} /> : <Eye size={19} />}
+              </button>
+            </div>
           </label>
         )}
         <button className="login-link" type="submit" disabled={submitting}>

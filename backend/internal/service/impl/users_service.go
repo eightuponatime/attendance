@@ -22,6 +22,9 @@ var (
 	ErrInvalidLocalAuth      = errors.New("invalid local auth")
 	ErrInvalidCredentials    = errors.New("invalid credentials")
 	ErrEmailAlreadyExists    = errors.New("email already exists")
+	ErrLoginAccountNotFound  = errors.New("login account not found")
+	ErrLoginPasswordMissing  = errors.New("login password missing")
+	ErrLoginPasswordMismatch = errors.New("login password mismatch")
 )
 
 type UsersService struct {
@@ -194,7 +197,7 @@ func (s *UsersService) LoginLocal(
 	}
 	if user == nil {
 		s.authDebugf("local login user not found: email=%q", normalized.Email)
-		return nil, ErrInvalidCredentials
+		return nil, ErrLoginAccountNotFound
 	}
 	if user.PasswordHash == nil || *user.PasswordHash == "" {
 		s.authDebugf(
@@ -204,7 +207,7 @@ func (s *UsersService) LoginLocal(
 			stringPtrValue(user.GoogleSub),
 			normalized.Password,
 		)
-		return nil, ErrInvalidCredentials
+		return nil, ErrLoginPasswordMissing
 	}
 	inputHash, hashErr := bcrypt.GenerateFromPassword([]byte(normalized.Password), bcrypt.DefaultCost)
 	if hashErr != nil {
@@ -228,7 +231,7 @@ func (s *UsersService) LoginLocal(
 			*user.PasswordHash,
 			err,
 		)
-		return nil, ErrInvalidCredentials
+		return nil, ErrLoginPasswordMismatch
 	}
 
 	s.authDebugf("local login success: email=%q user_id=%s", normalized.Email, user.Id)

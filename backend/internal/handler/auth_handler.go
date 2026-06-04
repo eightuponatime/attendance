@@ -356,9 +356,15 @@ func (h *AuthHandler) startUserSession(w http.ResponseWriter, r *http.Request, u
 func (h *AuthHandler) writeAuthError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, impl.ErrEmailAlreadyExists):
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "email already registered"})
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "Аккаунт с таким email уже существует"})
+	case errors.Is(err, impl.ErrLoginAccountNotFound):
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Аккаунт с таким email не найден"})
+	case errors.Is(err, impl.ErrLoginPasswordMissing):
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "У этого аккаунта нет пароля. Войдите через Google"})
+	case errors.Is(err, impl.ErrLoginPasswordMismatch):
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Неверный пароль"})
 	case errors.Is(err, impl.ErrInvalidCredentials):
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Проверьте email и пароль"})
 	case errors.Is(err, impl.ErrInvalidLocalAuth):
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 	default:
