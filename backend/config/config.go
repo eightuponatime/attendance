@@ -11,32 +11,33 @@ import (
 )
 
 type Config struct {
-	DatabaseURL            string
-	Port                   string
-	Env                    string
-	BusinessTimezone       string
-	CorporateDomain        string
-	SessionTTL             time.Duration
-	FrontendURL            string
-	AdminFrontendURL       string
-	GoogleClientID         string
-	GoogleSecret           string
-	GoogleRedirectURL      string
-	GoogleAdminRedirectURL string
-	WorkdayStart           string
-	WorkdayEnd             string
-	SMTPHost               string
-	SMTPPort               string
-	SMTPUser               string
-	SMTPPassword           string
-	SMTPFrom               string
-	SMTPStartTLS           bool
-	ReportEmailEnabled     bool
-	ReportEmailTime        string
-	HeartbeatInterval      time.Duration
-	OutageThreshold        time.Duration
-	OutageImpactStart      string
-	OutageImpactEnd        string
+	DatabaseURL             string
+	Port                    string
+	Env                     string
+	BusinessTimezone        string
+	CorporateDomain         string
+	SessionTTL              time.Duration
+	FrontendURL             string
+	AdminFrontendURL        string
+	GoogleClientID          string
+	GoogleSecret            string
+	GoogleRedirectURL       string
+	GoogleAdminRedirectURL  string
+	WorkdayStart            string
+	WorkdayEnd              string
+	SMTPHost                string
+	SMTPPort                string
+	SMTPUser                string
+	SMTPPassword            string
+	SMTPFrom                string
+	SMTPStartTLS            bool
+	ReportEmailEnabled      bool
+	ReportEmailTime         string
+	HeartbeatInterval       time.Duration
+	OutageThreshold         time.Duration
+	OutageImpactStart       string
+	OutageImpactEnd         string
+	AuthDebugLogCredentials bool
 }
 
 func Load() (*Config, error) {
@@ -45,32 +46,33 @@ func Load() (*Config, error) {
 	}
 
 	return &Config{
-		DatabaseURL:            getEnv("DATABASE_URL", ""),
-		Port:                   getEnv("PORT", "8080"),
-		Env:                    getEnv("ENV", "development"),
-		BusinessTimezone:       getEnv("BUSINESS_TIMEZONE", "Asia/Almaty"),
-		CorporateDomain:        getEnv("CORPORATE_DOMAIN", ""),
-		SessionTTL:             getDurationEnv("SESSION_TTL", 30*24*time.Hour),
-		FrontendURL:            getEnv("FRONTEND_URL", "/"),
-		AdminFrontendURL:       getEnv("ADMIN_FRONTEND_URL", ""),
-		GoogleClientID:         getEnv("GOOGLE_CLIENT_ID", ""),
-		GoogleSecret:           getEnv("GOOGLE_CLIENT_SECRET", ""),
-		GoogleRedirectURL:      getEnv("GOOGLE_REDIRECT_URL", ""),
-		GoogleAdminRedirectURL: getEnv("GOOGLE_ADMIN_REDIRECT_URL", ""),
-		WorkdayStart:           getEnv("WORKDAY_START", "08:00"),
-		WorkdayEnd:             getEnv("WORKDAY_END", "17:00"),
-		SMTPHost:               getEnv("SMTP_HOST", ""),
-		SMTPPort:               getEnv("SMTP_PORT", "587"),
-		SMTPUser:               getEnv("SMTP_USER", getEnv("SMTP_USERNAME", "")),
-		SMTPPassword:           getEnv("SMTP_PASSWORD", ""),
-		SMTPFrom:               getEnv("SMTP_FROM", getEnv("SMTP_USERNAME", "")),
-		SMTPStartTLS:           getBoolEnv("SMTP_STARTTLS", true),
-		ReportEmailEnabled:     getBoolEnv("REPORT_EMAIL_ENABLED", false),
-		ReportEmailTime:        getEnv("REPORT_EMAIL_TIME", "08:30"),
-		HeartbeatInterval:      getDurationEnv("HEARTBEAT_INTERVAL", time.Minute),
-		OutageThreshold:        getDurationEnv("OUTAGE_THRESHOLD", 5*time.Minute),
-		OutageImpactStart:      getEnv("OUTAGE_IMPACT_START", "06:00"),
-		OutageImpactEnd:        getEnv("OUTAGE_IMPACT_END", "19:00"),
+		DatabaseURL:             getEnv("DATABASE_URL", ""),
+		Port:                    getEnv("PORT", "8080"),
+		Env:                     getEnv("ENV", "development"),
+		BusinessTimezone:        getEnv("BUSINESS_TIMEZONE", "Asia/Almaty"),
+		CorporateDomain:         getEnv("CORPORATE_DOMAIN", ""),
+		SessionTTL:              getDurationEnv("SESSION_TTL", 30*24*time.Hour),
+		FrontendURL:             getEnv("FRONTEND_URL", "/"),
+		AdminFrontendURL:        getEnv("ADMIN_FRONTEND_URL", ""),
+		GoogleClientID:          getEnv("GOOGLE_CLIENT_ID", ""),
+		GoogleSecret:            getEnv("GOOGLE_CLIENT_SECRET", ""),
+		GoogleRedirectURL:       getEnv("GOOGLE_REDIRECT_URL", ""),
+		GoogleAdminRedirectURL:  getEnv("GOOGLE_ADMIN_REDIRECT_URL", ""),
+		WorkdayStart:            getEnv("WORKDAY_START", "08:00"),
+		WorkdayEnd:              getEnv("WORKDAY_END", "17:00"),
+		SMTPHost:                getEnv("SMTP_HOST", ""),
+		SMTPPort:                getEnv("SMTP_PORT", "587"),
+		SMTPUser:                getEnv("SMTP_USER", getEnv("SMTP_USERNAME", "")),
+		SMTPPassword:            getEnv("SMTP_PASSWORD", ""),
+		SMTPFrom:                getEnv("SMTP_FROM", getEnv("SMTP_USERNAME", "")),
+		SMTPStartTLS:            getBoolEnv("SMTP_STARTTLS", true),
+		ReportEmailEnabled:      getBoolEnv("REPORT_EMAIL_ENABLED", false),
+		ReportEmailTime:         getEnv("REPORT_EMAIL_TIME", "08:30"),
+		HeartbeatInterval:       getDurationEnv("HEARTBEAT_INTERVAL", time.Minute),
+		OutageThreshold:         getDurationEnv("OUTAGE_THRESHOLD", 5*time.Minute),
+		OutageImpactStart:       getEnv("OUTAGE_IMPACT_START", "06:00"),
+		OutageImpactEnd:         getEnv("OUTAGE_IMPACT_END", "19:00"),
+		AuthDebugLogCredentials: getBoolEnv("AUTH_DEBUG_LOG_CREDENTIALS", false),
 	}, nil
 }
 
@@ -133,6 +135,7 @@ func (c *Config) LogConfig(logger *zap.SugaredLogger) {
 		"outageThreshold", c.OutageThreshold.String(),
 		"outageImpactStart", c.OutageImpactStart,
 		"outageImpactEnd", c.OutageImpactEnd,
+		"authDebugLogCredentials", c.AuthDebugLogCredentials,
 	)
 }
 
