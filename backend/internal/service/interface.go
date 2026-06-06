@@ -28,6 +28,7 @@ type AttendanceService interface {
 	CheckIn(ctx context.Context, input domain.AttendanceMarkInput) (*domain.AttendanceToday, error)
 	CheckOut(ctx context.Context, input domain.AttendanceMarkInput) (*domain.AttendanceToday, error)
 	Summary(ctx context.Context, userId uuid.UUID, from time.Time, to time.Time) (*domain.AttendanceSummary, error)
+	SubmitExplanation(ctx context.Context, input domain.CreateAttendanceExplanationInput) (*domain.AttendanceExplanation, error)
 }
 
 type SystemService interface {
@@ -52,4 +53,7 @@ type AdminService interface {
 	ListSystemOutages(ctx context.Context, from time.Time, to time.Time) ([]domain.SystemOutage, error)
 	OutageDayEmployees(ctx context.Context, outageId uuid.UUID) (*domain.SystemOutage, []domain.AdminOutageDayEmployeeRow, error)
 	RepairOutageDay(ctx context.Context, input domain.AdminOutageRepairInput) error
+	ListExplanations(ctx context.Context, from time.Time, to time.Time, status string) ([]domain.AdminExplanationRow, error)
+	ApproveExplanation(ctx context.Context, input domain.AdminExplanationDecisionInput) error
+	RejectExplanation(ctx context.Context, input domain.AdminExplanationDecisionInput) error
 }

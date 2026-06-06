@@ -19,11 +19,18 @@ const (
 	AttendanceEventCheckIn  = "check_in"
 	AttendanceEventCheckOut = "check_out"
 
-	AttendanceStatusNormal = "normal"
+	AttendanceStatusNormal       = "normal"
+	AttendanceStatusSystemOutage = "system_outage"
 
 	AttendanceSummaryStatusEmpty      = "empty"
 	AttendanceSummaryStatusInProgress = "in_progress"
 	AttendanceSummaryStatusComplete   = "complete"
+
+	ExplanationReasonLate            = "late"
+	ExplanationReasonEarlyLeave      = "early_leave"
+	ExplanationReasonMissingCheckIn  = "missing_check_in"
+	ExplanationReasonMissingCheckOut = "missing_check_out"
+	ExplanationReasonMissingDay      = "missing_day"
 )
 
 var (
@@ -31,6 +38,7 @@ var (
 	ErrAttendanceAlreadyDone  = errors.New("attendance event already exists")
 	ErrCheckInRequired        = errors.New("check-in is required before check-out")
 	ErrInvalidAttendanceRange = errors.New("invalid attendance range")
+	ErrExplanationUnavailable = errors.New("explanation is not available for this day")
 )
 
 type AttendanceService struct {
@@ -250,6 +258,15 @@ func (s *AttendanceService) Summary(
 		rowsByDate[row.BusinessDate.In(location).Format("2006-01-02")] = row
 	}
 	impactedDates := s.impactedDates(ctx, from, to)
+	explanations, err := s.rp.ListExplanationsByUserRange(ctx, userId, from, to)
+	if err != nil {
+		return nil, err
+	}
+	explanationsByDate := make(map[string][]domain.AttendanceExplanation)
+	for _, explanation := range explanations {
+		key := explanation.BusinessDate.In(location).Format("2006-01-02")
+		explanationsByDate[key] = append(explanationsByDate[key], explanation)
+	}
 
 	days := make([]domain.AttendanceDaySummary, 0, int(to.Sub(from).Hours()/24)+1)
 	now := time.Now()
@@ -261,6 +278,7 @@ func (s *AttendanceService) Summary(
 				Date:             date,
 				Status:           AttendanceSummaryStatusEmpty,
 				ImpactedByOutage: impactedDates[dateKey],
+				Explanations:     explanationsByDate[dateKey],
 			})
 			continue
 		}
@@ -271,6 +289,7 @@ func (s *AttendanceService) Summary(
 			CheckOutAt:       row.CheckOutAt,
 			Status:           AttendanceSummaryStatusComplete,
 			ImpactedByOutage: impactedDates[dateKey],
+			Explanations:     explanationsByDate[dateKey],
 		}
 
 		if row.CheckInAt == nil {
@@ -306,6 +325,105 @@ func (s *AttendanceService) Summary(
 		TargetMinutesPerDay: targetMinutes,
 		Days:                days,
 	}, nil
+}
+
+func (s *AttendanceService) SubmitExplanation(
+	ctx context.Context,
+	input domain.CreateAttendanceExplanationInput,
+) (*domain.AttendanceExplanation, error) {
+	normalized, err := s.normalizeExplanationInput(input)
+	if err != nil {
+		return nil, err
+	}
+
+	location, err := time.LoadLocation(s.cfg.BusinessTimezone)
+	if err != nil {
+		return nil, err
+	}
+	businessDate := normalizeDate(normalized.BusinessDate, location)
+
+	record, err := s.rp.GetRecordByUserAndDate(ctx, normalized.UserId, businessDate)
+	if err != nil {
+		return nil, err
+	}
+	today, err := s.todayFromRecord(ctx, businessDate, record)
+	if err != nil {
+		return nil, err
+	}
+
+	if !s.explanationAllowed(businessDate, today, normalized.ReasonType, location) {
+		return nil, ErrExplanationUnavailable
+	}
+
+	normalized.BusinessDate = businessDate
+	return s.rp.UpsertExplanation(ctx, normalized)
+}
+
+func (s *AttendanceService) normalizeExplanationInput(
+	input domain.CreateAttendanceExplanationInput,
+) (domain.CreateAttendanceExplanationInput, error) {
+	normalized := domain.CreateAttendanceExplanationInput{
+		UserId:       input.UserId,
+		BusinessDate: input.BusinessDate,
+		ReasonType:   strings.TrimSpace(input.ReasonType),
+		Comment:      strings.Join(strings.Fields(strings.TrimSpace(input.Comment)), " "),
+	}
+
+	if normalized.UserId == uuid.Nil {
+		return domain.CreateAttendanceExplanationInput{}, fmt.Errorf("%w: user_id is empty", ErrInvalidAttendanceInput)
+	}
+	if normalized.BusinessDate.IsZero() {
+		return domain.CreateAttendanceExplanationInput{}, fmt.Errorf("%w: business_date is empty", ErrInvalidAttendanceInput)
+	}
+	if normalized.Comment == "" {
+		return domain.CreateAttendanceExplanationInput{}, fmt.Errorf("%w: comment is empty", ErrInvalidAttendanceInput)
+	}
+	if len([]rune(normalized.Comment)) > 1000 {
+		return domain.CreateAttendanceExplanationInput{}, fmt.Errorf("%w: comment is too long", ErrInvalidAttendanceInput)
+	}
+
+	switch normalized.ReasonType {
+	case ExplanationReasonLate,
+		ExplanationReasonEarlyLeave,
+		ExplanationReasonMissingCheckIn,
+		ExplanationReasonMissingCheckOut,
+		ExplanationReasonMissingDay:
+	default:
+		return domain.CreateAttendanceExplanationInput{}, fmt.Errorf("%w: reason_type is invalid", ErrInvalidAttendanceInput)
+	}
+
+	return normalized, nil
+}
+
+func (s *AttendanceService) explanationAllowed(
+	businessDate time.Time,
+	today *domain.AttendanceToday,
+	reasonType string,
+	location *time.Location,
+) bool {
+	now := time.Now().In(location)
+	afterReviewTime := !sameBusinessDate(businessDate, now, location) ||
+		!now.Before(workdayTime(businessDate, location, workdayClock{Hour: 18}))
+
+	switch reasonType {
+	case ExplanationReasonLate:
+		return today.CheckIn != nil && today.LateMinutes > 0
+	case ExplanationReasonEarlyLeave:
+		return today.CheckOut != nil && today.EarlyLeaveMinutes > 0
+	case ExplanationReasonMissingCheckOut:
+		return afterReviewTime && today.CheckIn != nil && today.CheckOut == nil
+	case ExplanationReasonMissingCheckIn:
+		return afterReviewTime && today.CheckIn == nil && today.CheckOut != nil
+	case ExplanationReasonMissingDay:
+		return afterReviewTime && !isWeekend(businessDate, location) && today.CheckIn == nil && today.CheckOut == nil
+	default:
+		return false
+	}
+}
+
+func isWeekend(date time.Time, location *time.Location) bool {
+	weekday := date.In(location).Weekday()
+	return weekday == time.Saturday || weekday == time.Sunday
 }
 
 func (s *AttendanceService) todayFromRecord(

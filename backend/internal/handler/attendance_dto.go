@@ -33,14 +33,28 @@ type attendanceSummaryResponse struct {
 }
 
 type attendanceDaySummaryResponse struct {
-	Date              string  `json:"date"`
-	CheckInAt         *string `json:"check_in_at"`
-	CheckOutAt        *string `json:"check_out_at"`
-	WorkedMinutes     int     `json:"worked_minutes"`
-	LateMinutes       int     `json:"late_minutes"`
-	EarlyLeaveMinutes int     `json:"early_leave_minutes"`
-	Status            string  `json:"status"`
-	ImpactedByOutage  bool    `json:"impacted_by_outage"`
+	Date              string                          `json:"date"`
+	CheckInAt         *string                         `json:"check_in_at"`
+	CheckOutAt        *string                         `json:"check_out_at"`
+	WorkedMinutes     int                             `json:"worked_minutes"`
+	LateMinutes       int                             `json:"late_minutes"`
+	EarlyLeaveMinutes int                             `json:"early_leave_minutes"`
+	Status            string                          `json:"status"`
+	ImpactedByOutage  bool                            `json:"impacted_by_outage"`
+	Explanations      []attendanceExplanationResponse `json:"explanations"`
+}
+
+type attendanceExplanationResponse struct {
+	Id                   string     `json:"id"`
+	BusinessDate         string     `json:"business_date"`
+	ReasonType           string     `json:"reason_type"`
+	Comment              string     `json:"comment"`
+	Status               string     `json:"status"`
+	ReviewedByAdminEmail *string    `json:"reviewed_by_admin_email"`
+	ReviewedAt           *time.Time `json:"reviewed_at"`
+	ReviewNote           *string    `json:"review_note"`
+	CreatedAt            time.Time  `json:"created_at"`
+	UpdatedAt            time.Time  `json:"updated_at"`
 }
 
 func newAttendanceTodayResponse(today *domain.AttendanceToday) attendanceTodayResponse {
@@ -88,6 +102,11 @@ func newAttendanceSummaryResponse(summary *domain.AttendanceSummary) attendanceS
 }
 
 func newAttendanceDaySummaryResponse(day domain.AttendanceDaySummary) attendanceDaySummaryResponse {
+	explanations := make([]attendanceExplanationResponse, 0, len(day.Explanations))
+	for _, explanation := range day.Explanations {
+		explanations = append(explanations, newAttendanceExplanationResponse(explanation))
+	}
+
 	return attendanceDaySummaryResponse{
 		Date:              day.Date.Format("2006-01-02"),
 		CheckInAt:         formatOptionalTime(day.CheckInAt),
@@ -97,6 +116,22 @@ func newAttendanceDaySummaryResponse(day domain.AttendanceDaySummary) attendance
 		EarlyLeaveMinutes: day.EarlyLeaveMinutes,
 		Status:            day.Status,
 		ImpactedByOutage:  day.ImpactedByOutage,
+		Explanations:      explanations,
+	}
+}
+
+func newAttendanceExplanationResponse(explanation domain.AttendanceExplanation) attendanceExplanationResponse {
+	return attendanceExplanationResponse{
+		Id:                   explanation.Id.String(),
+		BusinessDate:         explanation.BusinessDate.Format("2006-01-02"),
+		ReasonType:           explanation.ReasonType,
+		Comment:              explanation.Comment,
+		Status:               explanation.Status,
+		ReviewedByAdminEmail: explanation.ReviewedByAdminEmail,
+		ReviewedAt:           explanation.ReviewedAt,
+		ReviewNote:           explanation.ReviewNote,
+		CreatedAt:            explanation.CreatedAt,
+		UpdatedAt:            explanation.UpdatedAt,
 	}
 }
 

@@ -2,8 +2,10 @@ import { AlertTriangle, ArrowLeft, CalendarDays, ChevronDown, LogOut, Radio, Sea
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   addAdminAccess,
+  approveAdminExplanation,
   getAdminEmployee,
   getAdminEmployees,
+  getAdminExplanations,
   getAdminAccess,
   getAdminReports,
   getAdminSessions,
@@ -12,6 +14,7 @@ import {
   getAdminOutageDay,
   isAdminAuthError,
   repairAdminOutage,
+  rejectAdminExplanation,
   revokeAdminAccess,
   revokeAdminSession,
 } from "../api/adminApi";
@@ -22,6 +25,8 @@ import type {
   AdminEmployeeMonthDetail,
   AdminEmployeesMonth,
   AdminEmployeeSummary,
+  AdminExplanation,
+  AttendanceExplanationStatus,
   AdminReportRun,
   AdminSession,
   AdminSuspiciousActivity,
@@ -40,7 +45,7 @@ type EmployeeSuspiciousActivity = {
   total: number;
 };
 
-type AdminPageTab = "employees" | "access" | "outages";
+type AdminPageTab = "employees" | "access" | "outages" | "explanations";
 type EmployeeFilter = "all" | "late" | "early";
 
 export function AdminDashboard({
@@ -59,6 +64,7 @@ export function AdminDashboard({
   const [selectedEmployee, setSelectedEmployee] = useState<AdminEmployeeMonthDetail | null>(null);
   const [suspicious, setSuspicious] = useState<AdminSuspiciousActivity | null>(null);
   const [outages, setOutages] = useState<AdminSystemOutage[]>([]);
+  const [explanations, setExplanations] = useState<AdminExplanation[]>([]);
   const [pageTab, setPageTab] = useState<AdminPageTab>("employees");
   const [query, setQuery] = useState("");
   const [employeeFilter, setEmployeeFilter] = useState<EmployeeFilter>("all");
@@ -89,7 +95,11 @@ export function AdminDashboard({
     let alive = true;
 
     const load = () => {
-      Promise.all([getAdminEmployees(month), getAdminSuspiciousActivity(month), getAdminSystemOutages(month)])
+      Promise.all([
+        getAdminEmployees(month),
+        getAdminSuspiciousActivity(month),
+        getAdminSystemOutages(month),
+      ])
         .then(([employeeData, suspiciousData, outageData]) => {
           if (!alive) return;
           setEmployees(employeeData);
@@ -116,6 +126,18 @@ export function AdminDashboard({
       window.clearInterval(interval);
     };
   }, [handleError, isLive, month]);
+
+  useEffect(() => {
+    getAdminExplanations(month, "pending")
+      .then((data) => setExplanations(data.items))
+      .catch((err: unknown) => {
+        if (isAdminAuthError(err)) {
+          onAuthLost();
+          return;
+        }
+        setExplanations([]);
+      });
+  }, [month, onAuthLost]);
 
   useEffect(() => {
     if (!selectedUserId) {
@@ -204,6 +226,16 @@ export function AdminDashboard({
           Сбои сервера
         </button>
         <button
+          className={pageTab === "explanations" ? "admin-page-tab-active" : ""}
+          type="button"
+          onClick={() => setPageTab("explanations")}
+        >
+          Заявки
+          {explanations.filter((item) => item.status === "pending").length > 0 && (
+            <span>{explanations.filter((item) => item.status === "pending").length}</span>
+          )}
+        </button>
+        <button
           className={pageTab === "access" ? "admin-page-tab-active" : ""}
           type="button"
           onClick={() => setPageTab("access")}
@@ -278,6 +310,8 @@ export function AdminDashboard({
         </div>
       ) : pageTab === "outages" ? (
         <OutagesPanel outages={outages} onAuthLost={onAuthLost} />
+      ) : pageTab === "explanations" ? (
+        <ExplanationsPanel month={month} onPendingChange={setExplanations} onAuthLost={onAuthLost} />
       ) : (
         <AccessManagement onAuthLost={onAuthLost} />
       )}
@@ -564,7 +598,7 @@ function SelectedAdminDay({ day }: { day: AttendanceDaySummary }) {
       {day.impacted_by_outage && (
         <div className="admin-day-outage-note">
           <span>Сбой сервера</span>
-          <b>HR может восстановить отметки после проверки</b>
+            <b>Администратор может восстановить отметки после проверки</b>
         </div>
       )}
       <div>
@@ -682,6 +716,8 @@ function OutagesPanel({
   const canSaveRepair = repairDraft.items.length > 0 && !repairDraft.hasInvalid && !repairDraft.hasCheckOutWithoutCheckIn && Boolean(resolutionNote.trim());
   const selectedResolved = Boolean(selected?.outage.resolved_at);
   const canEditSelected = !selectedResolved || editingResolved;
+  const selectedIsToday = selected?.outage.affected_business_date === localISODate(new Date());
+  const fillButtonText = selectedIsToday ? "Заполнить пустые до текущего времени" : "Заполнить пустые 8:00-17:00";
 
   const openOutage = async (outage: AdminSystemOutage) => {
     if (!outage.impacts_work_hours) return;
@@ -717,14 +753,19 @@ function OutagesPanel({
   const fillStandardDay = () => {
     if (!selected) return;
     const next: Record<string, { check_in_at: string; check_out_at: string }> = {};
+    const defaultCheckOut = selectedIsToday ? "" : "17:00";
     for (const employee of selected.employees) {
       next[employee.user_id] = {
         check_in_at: employee.check_in_at ? "" : "8:00",
-        check_out_at: employee.check_out_at ? "" : "17:00",
+        check_out_at: employee.check_out_at ? "" : defaultCheckOut,
       };
     }
     setDraft(next);
-    setResolutionNote((current) => current || "Заполнены пустые отметки стандартным рабочим днем 8:00-17:00 из-за сбоя сервера.");
+    setResolutionNote((current) => current || (
+      selectedIsToday
+        ? "Заполнены пустые приходы из-за сбоя сервера. Уходы за текущий день не выставлялись заранее."
+        : "Заполнены пустые отметки стандартным рабочим днем 8:00-17:00 из-за сбоя сервера."
+    ));
   };
 
   const saveRepair = async () => {
@@ -831,7 +872,7 @@ function OutagesPanel({
           <div className="outage-actions">
             {!selectedResolved || editingResolved ? (
               <button type="button" onClick={fillStandardDay}>
-                Заполнить пустые 8:00-17:00
+                {fillButtonText}
               </button>
             ) : (
               <button type="button" onClick={() => setEditingResolved(true)}>
@@ -867,8 +908,10 @@ function OutagesPanel({
                       onOpen={() => setTimePicker({
                         userId: employee.user_id,
                         field: "check_in_at",
+                        businessDate: selected.outage.affected_business_date ?? "",
                         value: checkInValue,
                         defaultHour: "08",
+                        maxTime: selectedIsToday ? currentClockValue() : undefined,
                       })}
                     />
                   </label>
@@ -881,8 +924,10 @@ function OutagesPanel({
                       onOpen={() => setTimePicker({
                         userId: employee.user_id,
                         field: "check_out_at",
+                        businessDate: selected.outage.affected_business_date ?? "",
                         value: checkOutValue,
                         defaultHour: "17",
+                        maxTime: selectedIsToday ? currentClockValue() : undefined,
                       })}
                     />
                   </label>
@@ -933,6 +978,341 @@ function OutagesPanel({
       />
     </div>
   );
+}
+
+function ExplanationsPanel({
+  month,
+  onPendingChange,
+  onAuthLost,
+}: {
+  month: string;
+  onPendingChange: (items: AdminExplanation[]) => void;
+  onAuthLost: () => void;
+}) {
+  const [items, setItems] = useState<AdminExplanation[]>([]);
+  const [status, setStatus] = useState<AttendanceExplanationStatus | "all">("pending");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<{ check_in_at: string; check_out_at: string; review_note: string }>({
+    check_in_at: "",
+    check_out_at: "",
+    review_note: "",
+  });
+  const [timePicker, setTimePicker] = useState<TimePickerTarget | null>(null);
+  const [confirmAction, setConfirmAction] = useState<"approve" | "reject" | null>(null);
+  const [confirmRejectAllOpen, setConfirmRejectAllOpen] = useState(false);
+  const [bulkRejectNote, setBulkRejectNote] = useState("");
+  const [bulkRejecting, setBulkRejecting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const data = await getAdminExplanations(month, status === "all" ? "" : status);
+      setItems(data.items);
+      onPendingChange(data.items.filter((item) => item.status === "pending"));
+      setSelectedId((current) => {
+        if (current && data.items.some((item) => item.id === current)) {
+          return current;
+        }
+        return data.items[0]?.id ?? null;
+      });
+      setError(null);
+    } catch (err: unknown) {
+      if (isAdminAuthError(err)) {
+        onAuthLost();
+        return;
+      }
+      setError(errorText(err));
+    }
+  }, [month, onAuthLost, onPendingChange, status]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const selected = items.find((item) => item.id === selectedId) ?? items[0] ?? null;
+  const pendingItems = items.filter((item) => item.status === "pending");
+
+  useEffect(() => {
+    if (!selected) return;
+    setDraft({
+      check_in_at: "",
+      check_out_at: "",
+      review_note: selected.review_note ?? "",
+    });
+  }, [selected?.id]);
+
+  const checkInValue = repairTimeValue(draft.check_in_at, selected?.check_in_at ?? null);
+  const checkOutValue = repairTimeValue(draft.check_out_at, selected?.check_out_at ?? null);
+  const hasCheckOutWithoutCheckIn = Boolean(normalizeTimeInput(draft.check_out_at)) && !Boolean(checkInValue);
+  const missingRequiredRepair = selected ? explanationMissingRequiredRepair(selected, checkInValue, checkOutValue) : null;
+  const canApprove = Boolean(selected) && !hasCheckOutWithoutCheckIn && !missingRequiredRepair;
+  const canReject = Boolean(selected) && Boolean(draft.review_note.trim());
+
+  const applyDecision = async (decision: "approve" | "reject") => {
+    if (!selected) return;
+    const payload = {
+      review_note: draft.review_note.trim() || undefined,
+      check_in_at: normalizeTimeInput(draft.check_in_at),
+      check_out_at: normalizeTimeInput(draft.check_out_at),
+    };
+
+    try {
+      if (decision === "approve") {
+        await approveAdminExplanation(selected.id, payload);
+      } else {
+        await rejectAdminExplanation(selected.id, { review_note: payload.review_note });
+      }
+      setConfirmAction(null);
+      await load();
+    } catch (err: unknown) {
+      if (isAdminAuthError(err)) {
+        onAuthLost();
+        return;
+      }
+      setError(errorText(err));
+    }
+  };
+
+  const rejectAll = async () => {
+    const note = bulkRejectNote.trim();
+    if (pendingItems.length === 0 || !note) return;
+    setBulkRejecting(true);
+    try {
+      await Promise.all(
+        pendingItems.map((item) => rejectAdminExplanation(item.id, { review_note: note })),
+      );
+      setBulkRejectNote("");
+      setConfirmRejectAllOpen(false);
+      await load();
+    } catch (err: unknown) {
+      if (isAdminAuthError(err)) {
+        onAuthLost();
+        return;
+      }
+      setError(errorText(err));
+    } finally {
+      setBulkRejecting(false);
+    }
+  };
+
+  return (
+    <div className="explanations-layout">
+      <section className="admin-panel explanations-list-panel">
+        <div className="admin-panel-header">
+          <div>
+            <span>Пересмотр отметок</span>
+            <h2>Заявки сотрудников</h2>
+            <p>Объяснения по опозданиям, ранним уходам и пропущенным отметкам.</p>
+          </div>
+          <strong className="admin-count-badge">{items.filter((item) => item.status === "pending").length}</strong>
+        </div>
+
+        <div className="employee-filters">
+          {([
+            ["pending", "На рассмотрении"],
+            ["approved", "Одобрено"],
+            ["rejected", "Отклонено"],
+            ["all", "Все"],
+          ] as Array<[AttendanceExplanationStatus | "all", string]>).map(([value, label]) => (
+            <button
+              key={value}
+              className={status === value ? "employee-filter-active" : ""}
+              type="button"
+              onClick={() => setStatus(value)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {pendingItems.length > 0 && (
+          <div className="explanation-bulk-reject">
+            <label>
+              <span>Ответ для массового отклонения</span>
+              <textarea
+                value={bulkRejectNote}
+                rows={2}
+                placeholder="Комментарий увидят сотрудники"
+                onChange={(event) => setBulkRejectNote(event.target.value)}
+              />
+            </label>
+            <button
+              type="button"
+              disabled={!bulkRejectNote.trim() || bulkRejecting}
+              onClick={() => setConfirmRejectAllOpen(true)}
+            >
+              {bulkRejecting ? "Отклоняем..." : `Отклонить все (${pendingItems.length})`}
+            </button>
+          </div>
+        )}
+
+        {error && <p className="error-banner">{error}</p>}
+
+        {items.length === 0 ? (
+          <p className="muted-text">Заявок за выбранный период нет</p>
+        ) : (
+          <div className="explanations-list">
+            {items.map((item) => (
+              <button
+                key={item.id}
+                className={`explanation-admin-row ${item.id === selected?.id ? "explanation-admin-row-active" : ""}`}
+                type="button"
+                onClick={() => setSelectedId(item.id)}
+              >
+                <div>
+                  <strong>{item.full_name}</strong>
+                  <span>{item.email}</span>
+                  <p>{reasonText(item.reason_type)} · {formatDayShort(item.business_date)}</p>
+                </div>
+                <ExplanationAdminStatus status={item.status} />
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {selected && (
+        <section className="admin-panel explanation-review-panel">
+          <div className="admin-panel-header">
+            <div>
+              <span>{formatDayLong(selected.business_date)}</span>
+              <h2>{selected.full_name}</h2>
+              <p>{selected.email}</p>
+            </div>
+            <ExplanationAdminStatus status={selected.status} />
+          </div>
+
+          <div className="explanation-review-card">
+            <span>{reasonText(selected.reason_type)}</span>
+            <p>{selected.comment}</p>
+          </div>
+
+          <div className="admin-day-card explanation-current-day">
+            <div>
+              <span>Приход сейчас</span>
+              <b>{selected.check_in_at ? formatOnlyTime(selected.check_in_at) : "Нет"}</b>
+            </div>
+            <div>
+              <span>Уход сейчас</span>
+              <b>{selected.check_out_at ? formatOnlyTime(selected.check_out_at) : "Нет"}</b>
+            </div>
+          </div>
+
+          <div className="outage-repair-row explanation-time-row">
+            <div>
+              <strong>Корректировка времени</strong>
+              <span>Заполняйте только поля, которые нужно изменить.</span>
+            </div>
+            <label>
+              Приход
+              <TimePickerField
+                value={checkInValue}
+                disabled={selected.status !== "pending"}
+                placeholder="8:00"
+                onOpen={() => setTimePicker({
+                  userId: selected.id,
+                  field: "check_in_at",
+                  businessDate: selected.business_date,
+                  value: checkInValue,
+                  defaultHour: "08",
+                  maxTime: selected.business_date === localISODate(new Date()) ? currentClockValue() : undefined,
+                })}
+              />
+            </label>
+            <label>
+              Уход
+              <TimePickerField
+                value={checkOutValue}
+                disabled={selected.status !== "pending"}
+                placeholder="17:00"
+                onOpen={() => setTimePicker({
+                  userId: selected.id,
+                  field: "check_out_at",
+                  businessDate: selected.business_date,
+                  value: checkOutValue,
+                  defaultHour: "17",
+                  maxTime: selected.business_date === localISODate(new Date()) ? currentClockValue() : undefined,
+                })}
+              />
+            </label>
+          </div>
+
+          {hasCheckOutWithoutCheckIn && (
+            <p className="outage-validation">Нельзя сохранить уход без прихода.</p>
+          )}
+          {missingRequiredRepair && (
+            <p className="outage-validation">{missingRequiredRepair}</p>
+          )}
+
+          <label className="outage-note">
+            Ответ администратора
+            <textarea
+              value={draft.review_note}
+              rows={3}
+              disabled={selected.status !== "pending"}
+              placeholder="Комментарий виден сотруднику"
+              onChange={(event) => setDraft((current) => ({ ...current, review_note: event.target.value }))}
+            />
+          </label>
+
+          {selected.status === "pending" ? (
+            <div className="explanation-review-actions">
+              <button type="button" disabled={!canReject} onClick={() => setConfirmAction("reject")}>
+                Отклонить
+              </button>
+              <button type="button" disabled={!canApprove} onClick={() => setConfirmAction("approve")}>
+                Одобрить
+              </button>
+            </div>
+          ) : (
+            <p className="muted-text">
+              Рассмотрено {selected.reviewed_by_admin_email ? selected.reviewed_by_admin_email : "администратором"}
+              {selected.reviewed_at ? ` · ${formatDateTime(selected.reviewed_at)}` : ""}
+            </p>
+          )}
+        </section>
+      )}
+
+      <TimePickerDialog
+        target={timePicker}
+        onCancel={() => setTimePicker(null)}
+        onSelect={(value) => {
+          if (!timePicker) return;
+          setDraft((current) => ({ ...current, [timePicker.field]: value }));
+          setTimePicker(null);
+        }}
+      />
+      <ConfirmDialog
+        open={confirmAction !== null}
+        title={confirmAction === "approve" ? "Одобрить заявку?" : "Отклонить заявку?"}
+        text={
+          confirmAction === "approve"
+            ? "Если выбраны новые времена, они попадут в посещаемость и audit log."
+            : "Сотрудник увидит статус отклонения и комментарий администратора."
+        }
+        confirmText={confirmAction === "approve" ? "Одобрить" : "Отклонить"}
+        tone={confirmAction === "reject" ? "danger" : "neutral"}
+        onConfirm={() => {
+          if (!confirmAction) return;
+          void applyDecision(confirmAction);
+        }}
+        onCancel={() => setConfirmAction(null)}
+      />
+      <ConfirmDialog
+        open={confirmRejectAllOpen}
+        title="Отклонить все заявки?"
+        text={`Будут отклонены все заявки в текущем списке: ${pendingItems.length}. Сотрудники увидят общий комментарий администратора.`}
+        confirmText="Отклонить все"
+        tone="danger"
+        onConfirm={() => void rejectAll()}
+        onCancel={() => setConfirmRejectAllOpen(false)}
+      />
+    </div>
+  );
+}
+
+function ExplanationAdminStatus({ status }: { status: AttendanceExplanationStatus }) {
+  return <span className={`explanation-status explanation-status-${status}`}>{explanationStatusText(status)}</span>;
 }
 
 function AccessManagement({ onAuthLost }: { onAuthLost: () => void }) {
@@ -1281,8 +1661,10 @@ function formatOnlyTime(value: string): string {
 type TimePickerTarget = {
   userId: string;
   field: "check_in_at" | "check_out_at";
+  businessDate: string;
   value: string;
   defaultHour: string;
+  maxTime?: string;
 };
 
 function TimePickerField({
@@ -1297,7 +1679,12 @@ function TimePickerField({
   onOpen: () => void;
 }) {
   return (
-    <button className="time-picker-field" type="button" disabled={disabled} onClick={onOpen}>
+    <button
+      className={`time-picker-field ${value ? "" : "time-picker-field-empty"}`}
+      type="button"
+      disabled={disabled}
+      onClick={onOpen}
+    >
       {value || placeholder}
     </button>
   );
@@ -1314,6 +1701,7 @@ function TimePickerDialog({
 }) {
   const [hour, setHour] = useState("08");
   const [minute, setMinute] = useState("00");
+  const maxParsed = target?.maxTime ? parseTimeValue(target.maxTime) : null;
 
   useEffect(() => {
     if (!target) return;
@@ -1346,6 +1734,7 @@ function TimePickerDialog({
                   key={option.value}
                   className={option.value === hour ? "time-picker-selected" : ""}
                   type="button"
+                  disabled={isClockAfter(option.value, "00", maxParsed)}
                   onClick={() => setHour(option.value)}
                 >
                   {option.label}
@@ -1361,6 +1750,7 @@ function TimePickerDialog({
                   key={option}
                   className={option === minute ? "time-picker-selected" : ""}
                   type="button"
+                  disabled={isClockAfter(hour, option, maxParsed)}
                   onClick={() => setMinute(option)}
                 >
                   {option}
@@ -1373,7 +1763,7 @@ function TimePickerDialog({
           <button type="button" onClick={onCancel}>
             Отмена
           </button>
-          <button type="button" onClick={() => onSelect(`${hour}:${minute}`)}>
+          <button type="button" disabled={isClockAfter(hour, minute, maxParsed)} onClick={() => onSelect(`${hour}:${minute}`)}>
             Выбрать
           </button>
         </div>
@@ -1413,6 +1803,46 @@ function parseTimeValue(value: string): { hour: string; minute: string } | null 
 function normalizeTimeInput(value: string): string | undefined {
   const parsed = parseTimeValue(value);
   return parsed ? `${parsed.hour}:${parsed.minute}` : undefined;
+}
+
+function explanationMissingRequiredRepair(
+  explanation: AdminExplanation,
+  checkInValue: string,
+  checkOutValue: string,
+): string | null {
+  switch (explanation.reason_type) {
+    case "missing_day":
+      if (!checkInValue && !checkOutValue) return "Для полностью пустого дня выберите приход и уход.";
+      if (!checkInValue) return "Для полностью пустого дня выберите приход.";
+      if (!checkOutValue) return "Для полностью пустого дня выберите уход.";
+      return null;
+    case "missing_check_in":
+      return checkInValue ? null : "Для заявки без прихода выберите время прихода.";
+    case "missing_check_out":
+      return checkOutValue ? null : "Для заявки без ухода выберите время ухода.";
+    default:
+      return null;
+  }
+}
+
+function isClockAfter(
+  hour: string,
+  minute: string,
+  max: { hour: string; minute: string } | null,
+): boolean {
+  if (!max) return false;
+  const valueMinutes = Number(hour) * 60 + Number(minute);
+  const maxMinutes = Number(max.hour) * 60 + Number(max.minute);
+  return valueMinutes > maxMinutes;
+}
+
+function currentClockValue(): string {
+  const now = new Date();
+  return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+}
+
+function localISODate(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
 function buildOutageRepairItems(
@@ -1479,8 +1909,35 @@ function eventTypeText(value: "check_in" | "check_out"): string {
   return value === "check_in" ? "приход" : "уход";
 }
 
+function reasonText(value: AdminExplanation["reason_type"]): string {
+  switch (value) {
+    case "late":
+      return "Опоздание";
+    case "early_leave":
+      return "Ранний уход";
+    case "missing_check_in":
+      return "Нет прихода";
+    case "missing_check_out":
+      return "Нет ухода";
+    case "missing_day":
+      return "Нет отметок";
+  }
+}
+
+function explanationStatusText(value: AttendanceExplanationStatus): string {
+  switch (value) {
+    case "pending":
+      return "На рассмотрении";
+    case "approved":
+      return "Одобрено";
+    case "rejected":
+      return "Отклонено";
+  }
+}
+
 function dayDotClass(day: AttendanceDaySummary): string {
   if (day.impacted_by_outage) return "calendar-dot-outage";
+  if (day.explanations.some((item) => item.status === "pending")) return "calendar-dot-outage";
   if (day.late_minutes > 0 || day.early_leave_minutes > 0) return "calendar-dot-issue";
   if (day.status === "in_progress") return "calendar-dot-progress";
   return "calendar-dot-complete";

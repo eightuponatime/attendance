@@ -3,6 +3,8 @@ import type {
   AdminAccessList,
   AdminEmployeeMonthDetail,
   AdminEmployeesMonth,
+  AdminExplanationDecision,
+  AdminExplanationList,
   AdminMe,
   AdminReportList,
   AdminSessionList,
@@ -159,6 +161,46 @@ export async function getAdminSystemOutages(month: string): Promise<AdminSystemO
   await assertAdminResponse(response, "Не удалось получить список сбоев сервера");
 
   return response.json() as Promise<AdminSystemOutageList>;
+}
+
+export async function getAdminExplanations(month: string, status = ""): Promise<AdminExplanationList> {
+  const params = new URLSearchParams({ month });
+  if (status) params.set("status", status);
+  const response = await fetch(`/api/admin/explanations?${params.toString()}`, {
+    credentials: "include",
+  });
+
+  await assertAdminResponse(response, "Не удалось получить заявки на пересмотр");
+
+  return response.json() as Promise<AdminExplanationList>;
+}
+
+export async function approveAdminExplanation(
+  explanationId: string,
+  payload: AdminExplanationDecision,
+): Promise<void> {
+  const response = await fetch(`/api/admin/explanations/${explanationId}/approve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(payload),
+  });
+
+  await assertAdminResponse(response, "Не удалось одобрить заявку");
+}
+
+export async function rejectAdminExplanation(
+  explanationId: string,
+  payload: AdminExplanationDecision,
+): Promise<void> {
+  const response = await fetch(`/api/admin/explanations/${explanationId}/reject`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(payload),
+  });
+
+  await assertAdminResponse(response, "Не удалось отклонить заявку");
 }
 
 export async function getAdminOutageDay(outageId: string): Promise<AdminOutageDay> {

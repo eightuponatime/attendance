@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { getAttendanceSummary } from "../api/attendanceApi";
 import { errorText } from "../../../shared/api/errors";
 import { useI18n } from "../../../shared/i18n/i18n";
 import type { AttendanceDaySummary, AttendanceSummary } from "../../../shared/types/api";
+import { AttendanceExplanationBox } from "./AttendanceExplanationBox";
 
 export function StatsScreen() {
   const { t } = useI18n();
@@ -12,7 +13,7 @@ export function StatsScreen() {
   const [error, setError] = useState<string | null>(null);
   const range = useMemo(() => currentWeekRange(), []);
 
-  useEffect(() => {
+  const loadSummary = useCallback(() => {
     getAttendanceSummary(formatISODate(range.from), formatISODate(range.to))
       .then((data) => {
         setSummary(data);
@@ -28,6 +29,24 @@ export function StatsScreen() {
       })
       .catch((err: unknown) => setError(errorText(err)));
   }, [range.from, range.to]);
+
+  useEffect(() => {
+    loadSummary();
+  }, [loadSummary]);
+
+  useEffect(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") {
+        loadSummary();
+      }
+    };
+    window.addEventListener("focus", loadSummary);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.removeEventListener("focus", loadSummary);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [loadSummary]);
 
   const selectedDay = useMemo(() => {
     if (!summary || !selectedDate) {
@@ -68,7 +87,7 @@ export function StatsScreen() {
         )}
       </section>
 
-      {selectedDay && <SelectedDayCard day={selectedDay} />}
+      {selectedDay && <SelectedDayCard day={selectedDay} onSubmitted={loadSummary} />}
     </section>
   );
 }
@@ -206,7 +225,7 @@ function Bar({
   );
 }
 
-function SelectedDayCard({ day }: { day: AttendanceDaySummary }) {
+function SelectedDayCard({ day, onSubmitted }: { day: AttendanceDaySummary; onSubmitted: () => void }) {
   const { formatDateString, locale, t } = useI18n();
   return (
     <section className="stats-card selected-day-card">
@@ -236,6 +255,7 @@ function SelectedDayCard({ day }: { day: AttendanceDaySummary }) {
         />
         <Metric label={t("stats.worked")} value={day.worked_minutes > 0 ? minutesToClock(day.worked_minutes) : "0:00"} />
       </div>
+      <AttendanceExplanationBox day={day} onSubmitted={onSubmitted} />
     </section>
   );
 }

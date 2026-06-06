@@ -87,6 +87,7 @@ type UpsertAttendanceEventAtInput struct {
 	BusinessDate time.Time
 	EventType    string
 	EventAt      time.Time
+	Status       string
 }
 
 type UpsertAttendanceEventAtResult struct {
@@ -187,4 +188,20 @@ type AdminSuspiciousIPMatch struct {
 	Event          AdminAttendanceEventRow
 	PreviousEvent  AdminAttendanceEventRow
 	MinutesBetween int
+}
+
+type AdminExplanationRow struct {
+	AttendanceExplanation
+	Email      string     `db:"email"`
+	FullName   string     `db:"full_name"`
+	CheckInAt  *time.Time `db:"check_in_at"`
+	CheckOutAt *time.Time `db:"check_out_at"`
+}
+
+type AdminExplanationDecisionInput struct {
+	ExplanationId uuid.UUID
+	AdminEmail    string
+	ReviewNote    string
+	CheckInAt     *time.Time
+	CheckOutAt    *time.Time
 }

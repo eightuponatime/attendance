@@ -350,6 +350,9 @@ func (r *AdminRepository) ListAttendanceEvents(
 		join users u on u.id = ar.user_id
 		where ar.business_date >= $1
 			and ar.business_date <= $2
+			and ae.status <> 'system_outage'
+			and ae.device_id <> 'admin-adjustment'
+			and ae.external_ip <> 'internal'
 		order by ae.event_at
 	`
 
@@ -525,7 +528,7 @@ func (r *AdminRepository) UpsertAttendanceEventAt(
 			record_id, event_type, event_at, status,
 			phone_model, browser, device_id, external_ip
 		)
-		values ($1, $2, $3, 'system_outage', 'Admin adjustment', 'Admin panel', 'admin-adjustment', 'internal')
+		values ($1, $2, $3, $4, 'Admin adjustment', 'Admin panel', 'admin-adjustment', 'internal')
 		on conflict (record_id, event_type) do update set
 			event_at = excluded.event_at,
 			status = excluded.status,
@@ -534,7 +537,11 @@ func (r *AdminRepository) UpsertAttendanceEventAt(
 			device_id = excluded.device_id,
 			external_ip = excluded.external_ip
 	`
-	if _, err := q.ExecContext(ctx, eventQuery, record.Id, input.EventType, input.EventAt); err != nil {
+	status := input.Status
+	if status == "" {
+		status = "normal"
+	}
+	if _, err := q.ExecContext(ctx, eventQuery, record.Id, input.EventType, input.EventAt, status); err != nil {
 		return nil, err
 	}
 
@@ -563,6 +570,11 @@ func (r *AdminRepository) CreateAttendanceAdjustment(
 	`
 
 	q := extractTransaction(ctx, r.db)
+	var outageId any
+	if input.OutageId != uuid.Nil {
+		outageId = input.OutageId
+	}
+
 	_, err := q.ExecContext(
 		ctx,
 		query,
@@ -572,7 +584,7 @@ func (r *AdminRepository) CreateAttendanceAdjustment(
 		input.OldEventAt,
 		input.NewEventAt,
 		input.Reason,
-		input.OutageId,
+		outageId,
 		input.CreatedByAdminEmail,
 	)
 	return err
@@ -595,6 +607,134 @@ func (r *AdminRepository) ResolveSystemOutage(
 	q := extractTransaction(ctx, r.db)
 	_, err := q.ExecContext(ctx, query, outageId, adminEmail, note)
 	return err
+}
+
+func (r *AdminRepository) ListExplanations(
+	ctx context.Context,
+	from time.Time,
+	to time.Time,
+	status string,
+) ([]domain.AdminExplanationRow, error) {
+	query := `
+		select
+			ae.id,
+			ae.user_id,
+			u.email,
+			u.full_name,
+			ae.business_date,
+			ae.reason_type,
+			ae.comment,
+			ae.status,
+			ae.reviewed_by_admin_email,
+			ae.reviewed_at,
+			ae.review_note,
+			ae.created_at,
+			ae.updated_at,
+			ci.event_at as check_in_at,
+			co.event_at as check_out_at
+		from attendance_explanations ae
+		join users u on u.id = ae.user_id
+		left join attendance_records ar
+			on ar.user_id = ae.user_id
+			and ar.business_date = ae.business_date
+		left join attendance_events ci
+			on ci.record_id = ar.id
+			and ci.event_type = 'check_in'
+		left join attendance_events co
+			on co.record_id = ar.id
+			and co.event_type = 'check_out'
+		where ae.business_date >= $1
+			and ae.business_date <= $2
+	`
+	args := []any{from, to}
+	if status != "" {
+		query += " and ae.status = $3"
+		args = append(args, status)
+	}
+	query += " order by ae.status = 'pending' desc, ae.updated_at desc"
+
+	q := extractTransaction(ctx, r.db)
+	rows := make([]domain.AdminExplanationRow, 0)
+	if err := sqlx.SelectContext(ctx, q, &rows, query, args...); err != nil {
+		return nil, err
+	}
+
+	return rows, nil
+}
+
+func (r *AdminRepository) GetExplanationByID(
+	ctx context.Context,
+	id uuid.UUID,
+) (*domain.AdminExplanationRow, error) {
+	const query = `
+		select
+			ae.id,
+			ae.user_id,
+			u.email,
+			u.full_name,
+			ae.business_date,
+			ae.reason_type,
+			ae.comment,
+			ae.status,
+			ae.reviewed_by_admin_email,
+			ae.reviewed_at,
+			ae.review_note,
+			ae.created_at,
+			ae.updated_at,
+			ci.event_at as check_in_at,
+			co.event_at as check_out_at
+		from attendance_explanations ae
+		join users u on u.id = ae.user_id
+		left join attendance_records ar
+			on ar.user_id = ae.user_id
+			and ar.business_date = ae.business_date
+		left join attendance_events ci
+			on ci.record_id = ar.id
+			and ci.event_type = 'check_in'
+		left join attendance_events co
+			on co.record_id = ar.id
+			and co.event_type = 'check_out'
+		where ae.id = $1
+	`
+
+	q := extractTransaction(ctx, r.db)
+	var row domain.AdminExplanationRow
+	if err := sqlx.GetContext(ctx, q, &row, query, id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	return &row, nil
+}
+
+func (r *AdminRepository) UpdateExplanationReview(
+	ctx context.Context,
+	id uuid.UUID,
+	status string,
+	adminEmail string,
+	note string,
+) (*domain.AttendanceExplanation, error) {
+	const query = `
+		update attendance_explanations
+		set status = $2,
+			reviewed_by_admin_email = $3,
+			reviewed_at = now(),
+			review_note = nullif($4, ''),
+			updated_at = now()
+		where id = $1
+		returning id, user_id, business_date, reason_type, comment, status,
+			reviewed_by_admin_email, reviewed_at, review_note, created_at, updated_at
+	`
+
+	q := extractTransaction(ctx, r.db)
+	var row domain.AttendanceExplanation
+	if err := sqlx.GetContext(ctx, q, &row, query, id, status, adminEmail, note); err != nil {
+		return nil, err
+	}
+
+	return &row, nil
 }
 
 func (r *AdminRepository) createOrGetAttendanceRecord(

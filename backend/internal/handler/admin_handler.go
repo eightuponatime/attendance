@@ -35,6 +35,12 @@ type adminOutageRepairItemRequest struct {
 	CheckOutAt *string `json:"check_out_at"`
 }
 
+type adminExplanationDecisionRequest struct {
+	ReviewNote string  `json:"review_note"`
+	CheckInAt  *string `json:"check_in_at"`
+	CheckOutAt *string `json:"check_out_at"`
+}
+
 func NewAdminHandler(adminService service.AdminService, reportMailer *mailer.ReportMailer) *AdminHandler {
 	return &AdminHandler{
 		adminService: adminService,
@@ -57,6 +63,9 @@ func (h *AdminHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/admin/system-outages", h.SystemOutages)
 	r.Get("/admin/system-outages/{outageID}/day", h.SystemOutageDay)
 	r.Post("/admin/system-outages/{outageID}/repair", h.RepairSystemOutage)
+	r.Get("/admin/explanations", h.ListExplanations)
+	r.Post("/admin/explanations/{explanationID}/approve", h.ApproveExplanation)
+	r.Post("/admin/explanations/{explanationID}/reject", h.RejectExplanation)
 }
 
 func (h *AdminHandler) Me(w http.ResponseWriter, r *http.Request) {
@@ -305,6 +314,68 @@ func (h *AdminHandler) RepairSystemOutage(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
 }
 
+func (h *AdminHandler) ListExplanations(w http.ResponseWriter, r *http.Request) {
+	from, to, err := adminMonthRange(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid month"})
+		return
+	}
+
+	rows, err := h.adminService.ListExplanations(r.Context(), from, to, r.URL.Query().Get("status"))
+	if err != nil {
+		h.writeAdminError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, newAdminExplanationListResponse(rows))
+}
+
+func (h *AdminHandler) ApproveExplanation(w http.ResponseWriter, r *http.Request) {
+	h.reviewExplanation(w, r, true)
+}
+
+func (h *AdminHandler) RejectExplanation(w http.ResponseWriter, r *http.Request) {
+	h.reviewExplanation(w, r, false)
+}
+
+func (h *AdminHandler) reviewExplanation(w http.ResponseWriter, r *http.Request, approve bool) {
+	adminEmail, ok := appMiddleware.AdminEmailFromContext(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+
+	explanationID, err := uuid.Parse(chi.URLParam(r, "explanationID"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid explanation id"})
+		return
+	}
+
+	var request adminExplanationDecisionRequest
+	if err := readJSON(r, &request); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+
+	input, err := h.newExplanationDecisionInput(explanationID, adminEmail, request)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	if approve {
+		err = h.adminService.ApproveExplanation(r.Context(), input)
+	} else {
+		err = h.adminService.RejectExplanation(r.Context(), input)
+	}
+	if err != nil {
+		h.writeAdminError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+}
+
 func (h *AdminHandler) writeAdminError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, impl.ErrInvalidAdminInput):
@@ -355,6 +426,34 @@ func (h *AdminHandler) newOutageRepairInput(
 		ResolutionNote: request.ResolutionNote,
 		Items:          items,
 	}, nil
+}
+
+func (h *AdminHandler) newExplanationDecisionInput(
+	explanationID uuid.UUID,
+	adminEmail string,
+	request adminExplanationDecisionRequest,
+) (domain.AdminExplanationDecisionInput, error) {
+	input := domain.AdminExplanationDecisionInput{
+		ExplanationId: explanationID,
+		AdminEmail:    adminEmail,
+		ReviewNote:    request.ReviewNote,
+	}
+	if request.CheckInAt != nil && *request.CheckInAt != "" {
+		value, err := parseRepairClock(*request.CheckInAt)
+		if err != nil {
+			return domain.AdminExplanationDecisionInput{}, err
+		}
+		input.CheckInAt = &value
+	}
+	if request.CheckOutAt != nil && *request.CheckOutAt != "" {
+		value, err := parseRepairClock(*request.CheckOutAt)
+		if err != nil {
+			return domain.AdminExplanationDecisionInput{}, err
+		}
+		input.CheckOutAt = &value
+	}
+
+	return input, nil
 }
 
 func parseRepairClock(value string) (time.Time, error) {

@@ -160,3 +160,73 @@ func (r *AttendanceRepository) GetRangeEventRows(
 
 	return rows, nil
 }
+
+func (r *AttendanceRepository) UpsertExplanation(
+	ctx context.Context,
+	input domain.CreateAttendanceExplanationInput,
+) (*domain.AttendanceExplanation, error) {
+	const query = `
+		insert into attendance_explanations (
+			user_id,
+			business_date,
+			reason_type,
+			comment,
+			status,
+			reviewed_by_admin_email,
+			reviewed_at,
+			review_note
+		)
+		values ($1, $2, $3, $4, 'pending', null, null, null)
+		on conflict (user_id, business_date, reason_type) do update set
+			comment = excluded.comment,
+			status = 'pending',
+			reviewed_by_admin_email = null,
+			reviewed_at = null,
+			review_note = null,
+			updated_at = now()
+		returning id, user_id, business_date, reason_type, comment, status,
+			reviewed_by_admin_email, reviewed_at, review_note, created_at, updated_at
+	`
+
+	q := extractTransaction(ctx, r.db)
+	var row domain.AttendanceExplanation
+	if err := sqlx.GetContext(
+		ctx,
+		q,
+		&row,
+		query,
+		input.UserId,
+		input.BusinessDate,
+		input.ReasonType,
+		input.Comment,
+	); err != nil {
+		return nil, err
+	}
+
+	return &row, nil
+}
+
+func (r *AttendanceRepository) ListExplanationsByUserRange(
+	ctx context.Context,
+	userId uuid.UUID,
+	from time.Time,
+	to time.Time,
+) ([]domain.AttendanceExplanation, error) {
+	const query = `
+		select id, user_id, business_date, reason_type, comment, status,
+			reviewed_by_admin_email, reviewed_at, review_note, created_at, updated_at
+		from attendance_explanations
+		where user_id = $1
+			and business_date >= $2
+			and business_date <= $3
+		order by business_date, created_at
+	`
+
+	q := extractTransaction(ctx, r.db)
+	rows := make([]domain.AttendanceExplanation, 0)
+	if err := sqlx.SelectContext(ctx, q, &rows, query, userId, from, to); err != nil {
+		return nil, err
+	}
+
+	return rows, nil
+}

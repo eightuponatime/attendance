@@ -34,6 +34,8 @@ type AttendanceRepository interface {
 	GetEventByRecordAndType(ctx context.Context, recordId uuid.UUID, eventType string) (*domain.AttendanceEvents, error)
 	CreateEvent(ctx context.Context, input domain.CreateAttendanceEventInput) (*domain.AttendanceEvents, error)
 	GetRangeEventRows(ctx context.Context, userId uuid.UUID, from time.Time, to time.Time) ([]domain.AttendanceRangeEventRow, error)
+	UpsertExplanation(ctx context.Context, input domain.CreateAttendanceExplanationInput) (*domain.AttendanceExplanation, error)
+	ListExplanationsByUserRange(ctx context.Context, userId uuid.UUID, from time.Time, to time.Time) ([]domain.AttendanceExplanation, error)
 }
 
 type SystemRepository interface {
@@ -65,4 +67,7 @@ type AdminRepository interface {
 	UpsertAttendanceEventAt(ctx context.Context, input domain.UpsertAttendanceEventAtInput) (*domain.UpsertAttendanceEventAtResult, error)
 	CreateAttendanceAdjustment(ctx context.Context, input domain.CreateAttendanceAdjustmentInput) error
 	ResolveSystemOutage(ctx context.Context, outageId uuid.UUID, adminEmail string, note string) error
+	ListExplanations(ctx context.Context, from time.Time, to time.Time, status string) ([]domain.AdminExplanationRow, error)
+	GetExplanationByID(ctx context.Context, id uuid.UUID) (*domain.AdminExplanationRow, error)
+	UpdateExplanationReview(ctx context.Context, id uuid.UUID, status string, adminEmail string, note string) (*domain.AttendanceExplanation, error)
 }

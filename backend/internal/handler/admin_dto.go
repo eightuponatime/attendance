@@ -110,6 +110,28 @@ type adminOutageDayEmployeeResponse struct {
 	CheckOutAt *time.Time `json:"check_out_at"`
 }
 
+type adminExplanationListResponse struct {
+	Items []adminExplanationResponse `json:"items"`
+}
+
+type adminExplanationResponse struct {
+	Id                   string     `json:"id"`
+	UserId               string     `json:"user_id"`
+	Email                string     `json:"email"`
+	FullName             string     `json:"full_name"`
+	BusinessDate         string     `json:"business_date"`
+	ReasonType           string     `json:"reason_type"`
+	Comment              string     `json:"comment"`
+	Status               string     `json:"status"`
+	CheckInAt            *time.Time `json:"check_in_at"`
+	CheckOutAt           *time.Time `json:"check_out_at"`
+	ReviewedByAdminEmail *string    `json:"reviewed_by_admin_email"`
+	ReviewedAt           *time.Time `json:"reviewed_at"`
+	ReviewNote           *string    `json:"review_note"`
+	CreatedAt            time.Time  `json:"created_at"`
+	UpdatedAt            time.Time  `json:"updated_at"`
+}
+
 type adminSuspiciousDeviceResponse struct {
 	DeviceId string                       `json:"device_id"`
 	Owner    adminSuspiciousActorResponse `json:"owner"`
@@ -355,5 +377,34 @@ func newAdminOutageDayResponse(
 	return adminOutageDayResponse{
 		Outage:    newAdminSystemOutageResponse(*outage),
 		Employees: employees,
+	}
+}
+
+func newAdminExplanationListResponse(rows []domain.AdminExplanationRow) adminExplanationListResponse {
+	items := make([]adminExplanationResponse, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, newAdminExplanationResponse(row))
+	}
+
+	return adminExplanationListResponse{Items: items}
+}
+
+func newAdminExplanationResponse(row domain.AdminExplanationRow) adminExplanationResponse {
+	return adminExplanationResponse{
+		Id:                   row.Id.String(),
+		UserId:               row.UserId.String(),
+		Email:                row.Email,
+		FullName:             row.FullName,
+		BusinessDate:         row.BusinessDate.Format("2006-01-02"),
+		ReasonType:           row.ReasonType,
+		Comment:              row.Comment,
+		Status:               row.Status,
+		CheckInAt:            row.CheckInAt,
+		CheckOutAt:           row.CheckOutAt,
+		ReviewedByAdminEmail: row.ReviewedByAdminEmail,
+		ReviewedAt:           row.ReviewedAt,
+		ReviewNote:           row.ReviewNote,
+		CreatedAt:            row.CreatedAt,
+		UpdatedAt:            row.UpdatedAt,
 	}
 }

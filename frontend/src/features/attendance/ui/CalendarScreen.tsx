@@ -1,9 +1,10 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getAttendanceSummary } from "../api/attendanceApi";
 import { errorText } from "../../../shared/api/errors";
 import { useI18n } from "../../../shared/i18n/i18n";
 import type { AttendanceDaySummary, AttendanceSummary } from "../../../shared/types/api";
+import { AttendanceExplanationBox } from "./AttendanceExplanationBox";
 
 export function CalendarScreen() {
   const { formatDate, t, weekdayLabels } = useI18n();
@@ -20,7 +21,7 @@ export function CalendarScreen() {
     return { from, to };
   }, [visibleMonth]);
 
-  useEffect(() => {
+  const loadSummary = useCallback(() => {
     getAttendanceSummary(formatISODate(range.from), formatISODate(range.to))
       .then((data) => {
         setSummary(data);
@@ -28,6 +29,24 @@ export function CalendarScreen() {
       })
       .catch((err: unknown) => setError(errorText(err)));
   }, [range.from, range.to]);
+
+  useEffect(() => {
+    loadSummary();
+  }, [loadSummary]);
+
+  useEffect(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") {
+        loadSummary();
+      }
+    };
+    window.addEventListener("focus", loadSummary);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.removeEventListener("focus", loadSummary);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [loadSummary]);
 
   useEffect(() => {
     const selected = new Date(`${selectedDate}T00:00:00`);
@@ -125,7 +144,7 @@ export function CalendarScreen() {
             />
           </section>
 
-          <CalendarDayCard day={selectedDay} />
+          <CalendarDayCard day={selectedDay} onSubmitted={loadSummary} />
         </>
       ) : (
         <YearSwitcher
@@ -253,7 +272,7 @@ function MiniMonth({
   );
 }
 
-function CalendarDayCard({ day }: { day: AttendanceDaySummary }) {
+function CalendarDayCard({ day, onSubmitted }: { day: AttendanceDaySummary; onSubmitted: () => void }) {
   const { formatDateString, locale, t } = useI18n();
   return (
     <section className="stats-card selected-day-card">
@@ -284,6 +303,7 @@ function CalendarDayCard({ day }: { day: AttendanceDaySummary }) {
           value={day.worked_minutes > 0 ? minutesToClock(day.worked_minutes) : "0:00"}
         />
       </div>
+      <AttendanceExplanationBox day={day} onSubmitted={onSubmitted} />
     </section>
   );
 }
@@ -352,6 +372,7 @@ function emptyDay(date: string): AttendanceDaySummary {
     early_leave_minutes: 0,
     status: "empty",
     impacted_by_outage: false,
+    explanations: [],
   };
 }
 
@@ -395,6 +416,7 @@ function statusText(day: AttendanceDaySummary, t: ReturnType<typeof useI18n>["t"
 
 function dayDotClass(day: AttendanceDaySummary): string {
   if (day.impacted_by_outage) return "calendar-dot-outage";
+  if (day.explanations.some((item) => item.status === "pending")) return "calendar-dot-outage";
   if (day.late_minutes > 0 || day.early_leave_minutes > 0) return "calendar-dot-issue";
   if (day.status === "in_progress") return "calendar-dot-progress";
   return "calendar-dot-complete";

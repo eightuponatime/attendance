@@ -1,5 +1,7 @@
 import { responseErrorMessage } from "../../../shared/api/errors";
 import type {
+  AttendanceExplanation,
+  AttendanceExplanationReason,
   AttendanceMarkPayload,
   AttendanceSummary,
   AttendanceToday,
@@ -40,6 +42,25 @@ export async function checkIn(payload: AttendanceMarkPayload): Promise<Attendanc
 
 export async function checkOut(payload: AttendanceMarkPayload): Promise<AttendanceToday> {
   return markAttendance("/api/attendance/check-out", payload);
+}
+
+export async function submitAttendanceExplanation(payload: {
+  business_date: string;
+  reason_type: AttendanceExplanationReason;
+  comment: string;
+}): Promise<AttendanceExplanation> {
+  const response = await fetch("/api/attendance/explanations", {
+    method: "POST",
+    headers: jsonHeaders,
+    credentials: "include",
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response));
+  }
+
+  return response.json() as Promise<AttendanceExplanation>;
 }
 
 async function markAttendance(

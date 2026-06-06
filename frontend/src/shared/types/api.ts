@@ -32,6 +32,27 @@ export type AttendanceMarkPayload = {
 };
 
 export type AttendanceDayStatus = "empty" | "in_progress" | "complete";
+export type AttendanceExplanationStatus = "pending" | "approved" | "rejected";
+export type AttendanceExplanationReason =
+  | "late"
+  | "early_leave"
+  | "missing_check_in"
+  | "missing_check_out"
+  | "missing_day";
+
+export type AttendanceExplanation = {
+  id: string;
+  user_id: string;
+  business_date: string;
+  reason_type: AttendanceExplanationReason;
+  comment: string;
+  status: AttendanceExplanationStatus;
+  reviewed_by_admin_email: string | null;
+  reviewed_at: string | null;
+  review_note: string | null;
+  created_at: string;
+  updated_at: string;
+};
 
 export type AttendanceDaySummary = {
   date: string;
@@ -42,6 +63,7 @@ export type AttendanceDaySummary = {
   early_leave_minutes: number;
   status: AttendanceDayStatus;
   impacted_by_outage: boolean;
+  explanations: AttendanceExplanation[];
 };
 
 export type AttendanceSummary = {
@@ -195,6 +217,23 @@ export type AdminOutageDay = {
 
 export type AdminOutageRepairItem = {
   user_id: string;
+  check_in_at?: string;
+  check_out_at?: string;
+};
+
+export type AdminExplanation = AttendanceExplanation & {
+  email: string;
+  full_name: string;
+  check_in_at: string | null;
+  check_out_at: string | null;
+};
+
+export type AdminExplanationList = {
+  items: AdminExplanation[];
+};
+
+export type AdminExplanationDecision = {
+  review_note?: string;
   check_in_at?: string;
   check_out_at?: string;
 };

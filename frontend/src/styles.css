@@ -843,6 +843,172 @@ a {
   font-weight: 800;
 }
 
+.explanation-box {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #e3e9f2;
+  border-radius: 8px;
+  background: #fbfcfe;
+}
+
+.explanation-header,
+.explanation-history-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.explanation-header > div,
+.explanation-history-row > div {
+  min-width: 0;
+}
+
+.explanation-header span,
+.explanation-history-row span,
+.explanation-history-row em {
+  display: block;
+  color: #697083;
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.explanation-header strong {
+  display: block;
+  margin-top: 2px;
+  font-size: 14px;
+}
+
+.explanation-history {
+  display: grid;
+  gap: 8px;
+}
+
+.explanation-history-row {
+  padding: 10px;
+  border-radius: 8px;
+  background: #f4f7fb;
+}
+
+.explanation-history-row strong {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.explanation-history-row em {
+  margin-top: 5px;
+  color: #40506a;
+  font-style: normal;
+}
+
+.explanation-admin-reply {
+  display: grid;
+  gap: 4px;
+  margin-top: 10px;
+  padding: 10px;
+  border-left: 3px solid #113650;
+  border-radius: 8px;
+  color: #113650;
+  background: #eaf2f8;
+}
+
+.explanation-admin-reply small {
+  color: #536078;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.explanation-admin-reply p {
+  margin: 0;
+  color: #0d2440;
+  font-size: 13px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.explanation-status {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.explanation-status-pending {
+  color: #8a5b08;
+  background: #fff0cc;
+}
+
+.explanation-status-approved {
+  color: #167145;
+  background: #e2f5eb;
+}
+
+.explanation-status-rejected {
+  color: #b93636;
+  background: #ffe6e6;
+}
+
+.explanation-reason-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.explanation-reason-tabs button {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid #dfe6f0;
+  border-radius: 999px;
+  color: #40506a;
+  background: #ffffff;
+  font-weight: 800;
+}
+
+.explanation-reason-tabs .explanation-reason-active {
+  border-color: #113650;
+  color: #ffffff;
+  background: #113650;
+}
+
+.explanation-box textarea {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  padding: 10px;
+  border: 1px solid #dfe6f0;
+  border-radius: 8px;
+  color: #070d22;
+  background: #ffffff;
+  font: inherit;
+  overflow-wrap: anywhere;
+  resize: vertical;
+}
+
+.explanation-box > button {
+  min-height: 40px;
+  border: 0;
+  border-radius: 8px;
+  color: #ffffff;
+  background: #113650;
+  font-weight: 900;
+}
+
+.explanation-box > button:disabled {
+  color: #7b8495;
+  background: #e7ebf2;
+}
+
 .history-card {
   padding: 18px 18px;
 }
@@ -1453,6 +1619,18 @@ a {
   box-shadow: 0 2px 8px rgb(13 20 40 / 0.08);
 }
 
+.admin-page-tabs button span {
+  display: inline-grid;
+  min-width: 22px;
+  min-height: 22px;
+  margin-left: 6px;
+  place-items: center;
+  border-radius: 999px;
+  color: #ffffff;
+  background: #e54e4e;
+  font-size: 12px;
+}
+
 .admin-layout {
   display: grid;
   grid-template-columns: minmax(320px, 0.9fr) minmax(0, 1.5fr);
@@ -1492,6 +1670,11 @@ a {
   align-items: start;
   justify-content: space-between;
   gap: 16px;
+  min-width: 0;
+}
+
+.admin-panel-header > div {
+  min-width: 0;
 }
 
 .admin-count-badge {
@@ -1662,6 +1845,180 @@ a {
   gap: 16px;
   align-items: start;
   min-width: 0;
+}
+
+.explanations-layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.78fr) minmax(0, 1.22fr);
+  gap: 16px;
+  align-items: start;
+  min-width: 0;
+}
+
+.explanations-list {
+  display: grid;
+  gap: 8px;
+  max-height: 620px;
+  overflow-y: auto;
+  padding-right: 4px;
+  min-width: 0;
+}
+
+.explanation-bulk-reject {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #f0d6d6;
+  border-radius: 8px;
+  background: #fff8f8;
+}
+
+.explanation-bulk-reject label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.explanation-bulk-reject span {
+  color: #697083;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.explanation-bulk-reject textarea {
+  min-width: 0;
+  max-width: 100%;
+  padding: 9px 10px;
+  border: 1px solid #e8c9c9;
+  border-radius: 8px;
+  color: #080d24;
+  background: #ffffff;
+  font: inherit;
+  resize: vertical;
+}
+
+.explanation-bulk-reject button {
+  min-height: 38px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  color: #ffffff;
+  background: #e54e4e;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.explanation-bulk-reject button:disabled {
+  color: #8b95a6;
+  background: #e7ebf2;
+  cursor: not-allowed;
+}
+
+.explanation-admin-row {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #e4e9f2;
+  border-radius: 8px;
+  color: #080d24;
+  background: #ffffff;
+  text-align: left;
+}
+
+.explanation-admin-row > div {
+  min-width: 0;
+}
+
+.explanation-admin-row-active {
+  border-color: #b8d4ff;
+  background: #f2f7ff;
+}
+
+.explanation-admin-row strong,
+.explanation-admin-row span,
+.explanation-admin-row p {
+  display: block;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.explanation-admin-row span,
+.explanation-admin-row p {
+  margin: 2px 0 0;
+  color: #697083;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.explanation-review-panel {
+  gap: 14px;
+  min-width: 0;
+}
+
+.explanation-review-card {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 14px;
+  border-radius: 8px;
+  background: #f4f7fb;
+}
+
+.explanation-review-card span {
+  color: #697083;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.explanation-review-card p {
+  margin: 0;
+  color: #080d24;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.explanation-current-day {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.explanation-time-row {
+  grid-template-columns: minmax(0, 1fr) 132px 132px;
+}
+
+.explanation-review-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.explanation-review-actions button {
+  min-height: 40px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 8px;
+  color: #ffffff;
+  background: #113650;
+  font-weight: 900;
+}
+
+.explanation-review-actions button:first-child {
+  background: #e54e4e;
+}
+
+.explanation-review-actions button:disabled {
+  color: #7b8495;
+  background: #e7ebf2;
+  cursor: not-allowed;
 }
 
 .outage-list {
@@ -1865,6 +2222,12 @@ a {
   color: #697083;
   background: #f4f6f9;
   cursor: not-allowed;
+}
+
+.time-picker-field-empty {
+  color: #8b95a6;
+  background: #f8fafc;
+  font-weight: 700;
 }
 
 .outage-note textarea {
@@ -2425,6 +2788,7 @@ a {
 
   .admin-layout,
   .access-layout,
+  .explanations-layout,
   .admin-metrics-row,
   .suspicious-grid {
     grid-template-columns: minmax(0, 1fr);
@@ -2519,7 +2883,11 @@ a {
   }
 
   .outage-layout,
-  .outage-repair-row {
+  .outage-repair-row,
+  .explanations-layout,
+  .explanation-bulk-reject,
+  .explanation-time-row,
+  .explanation-current-day {
     grid-template-columns: minmax(0, 1fr);
   }
 

@@ -69,6 +69,7 @@ type AttendanceDaySummary struct {
 	EarlyLeaveMinutes int
 	Status            string
 	ImpactedByOutage  bool
+	Explanations      []AttendanceExplanation
 }
 
 type AttendanceSummary struct {
@@ -78,4 +79,25 @@ type AttendanceSummary struct {
 	WorkdayEnd          string
 	TargetMinutesPerDay int
 	Days                []AttendanceDaySummary
+}
+
+type AttendanceExplanation struct {
+	Id                   uuid.UUID  `db:"id" json:"id"`
+	UserId               uuid.UUID  `db:"user_id" json:"user_id"`
+	BusinessDate         time.Time  `db:"business_date" json:"business_date"`
+	ReasonType           string     `db:"reason_type" json:"reason_type"`
+	Comment              string     `db:"comment" json:"comment"`
+	Status               string     `db:"status" json:"status"`
+	ReviewedByAdminEmail *string    `db:"reviewed_by_admin_email" json:"reviewed_by_admin_email"`
+	ReviewedAt           *time.Time `db:"reviewed_at" json:"reviewed_at"`
+	ReviewNote           *string    `db:"review_note" json:"review_note"`
+	CreatedAt            time.Time  `db:"created_at" json:"created_at"`
+	UpdatedAt            time.Time  `db:"updated_at" json:"updated_at"`
+}
+
+type CreateAttendanceExplanationInput struct {
+	UserId       uuid.UUID
+	BusinessDate time.Time
+	ReasonType   string
+	Comment      string
 }
