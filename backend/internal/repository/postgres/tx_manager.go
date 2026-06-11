@@ -25,7 +25,8 @@ func NewTransactionManager(db *sqlx.DB) *TransactionManager {
 // if @param fn succeed -> commit transaction
 func (m *TransactionManager) WithTransaction(
 	ctx context.Context,
-	fn func(context context.Context) error) error {
+	fn func(context context.Context) error,
+) error {
 	transaction, err := m.db.BeginTxx(ctx, &sql.TxOptions{
 		Isolation: sql.LevelReadCommitted,
 	})
