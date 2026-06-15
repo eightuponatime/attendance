@@ -39,7 +39,7 @@ type AttendanceRepository interface {
 }
 
 type SystemRepository interface {
-	ListImpactedBusinessDates(ctx context.Context, from time.Time, to time.Time) ([]time.Time, error)
+	ListSystemOutages(ctx context.Context, from time.Time, to time.Time) ([]domain.SystemOutage, error)
 }
 
 type AdminRepository interface {

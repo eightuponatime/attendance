@@ -678,9 +678,10 @@ a {
 }
 
 .calendar-day {
+  grid-template-rows: 34px 8px;
   place-items: center;
   align-content: center;
-  gap: 8px;
+  gap: 4px;
   border: 0;
   border-radius: 8px;
   color: #080d24;
@@ -718,6 +719,10 @@ a {
 
 .calendar-dot-progress {
   background: #f2a735;
+}
+
+.calendar-dot-live {
+  background: #1f6fe5;
 }
 
 .calendar-dot-issue {

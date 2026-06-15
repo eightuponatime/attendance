@@ -417,7 +417,12 @@ function statusText(day: AttendanceDaySummary, t: ReturnType<typeof useI18n>["t"
 function dayDotClass(day: AttendanceDaySummary): string {
   if (day.impacted_by_outage) return "calendar-dot-outage";
   if (day.explanations.some((item) => item.status === "pending")) return "calendar-dot-outage";
+  if (isTodayInProgress(day)) return "calendar-dot-live";
   if (day.late_minutes > 0 || day.early_leave_minutes > 0) return "calendar-dot-issue";
   if (day.status === "in_progress") return "calendar-dot-progress";
   return "calendar-dot-complete";
+}
+
+function isTodayInProgress(day: AttendanceDaySummary): boolean {
+  return day.date === formatISODate(new Date()) && Boolean(day.check_in_at) && !day.check_out_at;
 }

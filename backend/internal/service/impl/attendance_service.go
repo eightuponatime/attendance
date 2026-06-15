@@ -592,14 +592,71 @@ func (s *AttendanceService) impactedDates(ctx context.Context, from time.Time, t
 		return result
 	}
 
-	dates, err := s.systemRp.ListImpactedBusinessDates(ctx, from, to)
+	outages, err := s.systemRp.ListSystemOutages(ctx, from, to)
 	if err != nil {
 		return result
 	}
-	for _, date := range dates {
-		result[date.Format("2006-01-02")] = true
+	location, err := time.LoadLocation(s.cfg.BusinessTimezone)
+	if err != nil {
+		return result
+	}
+	for _, outage := range outages {
+		addImpactedOutageDates(
+			result,
+			outage,
+			from,
+			to,
+			location,
+			s.cfg.OutageImpactStart,
+			s.cfg.OutageImpactEnd,
+		)
 	}
 	return result
+}
+
+func addImpactedOutageDates(
+	result map[string]bool,
+	outage domain.SystemOutage,
+	from time.Time,
+	to time.Time,
+	location *time.Location,
+	impactStart string,
+	impactEnd string,
+) {
+	if !outage.ImpactsWorkHours {
+		return
+	}
+
+	startClock, err := time.Parse("15:04", impactStart)
+	if err != nil {
+		return
+	}
+	endClock, err := time.Parse("15:04", impactEnd)
+	if err != nil {
+		return
+	}
+
+	fromDate := normalizeDate(from, location)
+	toDate := normalizeDate(to, location)
+	for day := normalizeDate(outage.StartedAt.In(location), location); !day.After(normalizeDate(outage.EndedAt.In(location), location)); day = day.AddDate(0, 0, 1) {
+		if !isBusinessWeekday(day) {
+			continue
+		}
+		if day.Before(fromDate) || day.After(toDate) {
+			continue
+		}
+
+		windowStart := time.Date(day.Year(), day.Month(), day.Day(), startClock.Hour(), startClock.Minute(), 0, 0, location)
+		windowEnd := time.Date(day.Year(), day.Month(), day.Day(), endClock.Hour(), endClock.Minute(), 0, 0, location)
+		if outage.StartedAt.Before(windowEnd) && outage.EndedAt.After(windowStart) {
+			result[day.Format("2006-01-02")] = true
+		}
+	}
+}
+
+func isBusinessWeekday(date time.Time) bool {
+	weekday := date.Weekday()
+	return weekday != time.Saturday && weekday != time.Sunday
 }
 
 func sameBusinessDate(date time.Time, value time.Time, location *time.Location) bool {

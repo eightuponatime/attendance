@@ -32,6 +32,7 @@ type Config struct {
 	SMTPFrom                string
 	SMTPStartTLS            bool
 	ReportEmailEnabled      bool
+	ReportEmailFrequency    string
 	ReportEmailTime         string
 	HeartbeatInterval       time.Duration
 	OutageThreshold         time.Duration
@@ -67,6 +68,7 @@ func Load() (*Config, error) {
 		SMTPFrom:                getEnv("SMTP_FROM", getEnv("SMTP_USERNAME", "")),
 		SMTPStartTLS:            getBoolEnv("SMTP_STARTTLS", true),
 		ReportEmailEnabled:      getBoolEnv("REPORT_EMAIL_ENABLED", false),
+		ReportEmailFrequency:    getEnv("REPORT_EMAIL_FREQUENCY", "monthly"),
 		ReportEmailTime:         getEnv("REPORT_EMAIL_TIME", "08:30"),
 		HeartbeatInterval:       getDurationEnv("HEARTBEAT_INTERVAL", time.Minute),
 		OutageThreshold:         getDurationEnv("OUTAGE_THRESHOLD", 5*time.Minute),
@@ -130,6 +132,7 @@ func (c *Config) LogConfig(logger *zap.SugaredLogger) {
 		"workdayEnd", c.WorkdayEnd,
 		"smtpConfigured", c.SMTPConfigured(),
 		"reportEmailEnabled", c.ReportEmailEnabled,
+		"reportEmailFrequency", c.ReportEmailFrequency,
 		"reportEmailTime", c.ReportEmailTime,
 		"heartbeatInterval", c.HeartbeatInterval.String(),
 		"outageThreshold", c.OutageThreshold.String(),

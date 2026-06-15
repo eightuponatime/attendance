@@ -151,6 +151,11 @@ export function AdminDashboard({
       });
   }, [month, onAuthLost]);
 
+  const outageVersion = useMemo(
+    () => outages.map((outage) => `${outage.id}:${outage.affected_business_date ?? ""}:${outage.resolved_at ?? ""}`).join("|"),
+    [outages],
+  );
+
   useEffect(() => {
     if (!selectedUserId) {
       setSelectedEmployee(null);
@@ -163,9 +168,17 @@ export function AdminDashboard({
         setError(null);
       })
       .catch(handleError);
-  }, [handleError, month, selectedUserId]);
+  }, [handleError, month, outageVersion, selectedUserId]);
 
   const suspiciousCounts = useMemo(() => suspiciousCountsByUser(suspicious), [suspicious]);
+  const unresolvedOutageCount = useMemo(
+    () => outages.filter((outage) => outage.impacts_work_hours && !outage.resolved_at).length,
+    [outages],
+  );
+  const pendingExplanationCount = useMemo(
+    () => explanations.filter((item) => item.status === "pending").length,
+    [explanations],
+  );
   const filteredEmployees = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     const rows = employees?.employees ?? [];
@@ -264,6 +277,7 @@ export function AdminDashboard({
           onClick={() => setPageTab("outages")}
         >
           Сбои сервера
+          {unresolvedOutageCount > 0 && <span>{unresolvedOutageCount}</span>}
         </button>
         <button
           className={pageTab === "explanations" ? "admin-page-tab-active" : ""}
@@ -271,9 +285,7 @@ export function AdminDashboard({
           onClick={() => setPageTab("explanations")}
         >
           Заявки
-          {explanations.filter((item) => item.status === "pending").length > 0 && (
-            <span>{explanations.filter((item) => item.status === "pending").length}</span>
-          )}
+          {pendingExplanationCount > 0 && <span>{pendingExplanationCount}</span>}
         </button>
         <button
           className={pageTab === "access" ? "admin-page-tab-active" : ""}
@@ -517,7 +529,8 @@ function EmployeeDetail({
   suspicious: AdminSuspiciousActivity | null;
 }) {
   const markedDays = employee.days.filter((day) => day.status !== "empty");
-  const defaultDay = [...markedDays].reverse()[0] ?? employee.days.find((day) => day.status !== "empty") ?? employee.days[0];
+  const todayDay = employee.days.find((day) => day.date === localISODate(new Date()));
+  const defaultDay = todayDay ?? [...markedDays].reverse()[0] ?? employee.days.find((day) => day.status !== "empty") ?? employee.days[0];
   const [selectedDate, setSelectedDate] = useState(defaultDay?.date ?? "");
   const [tab, setTab] = useState<"calendar" | "suspicious">("calendar");
 
@@ -616,7 +629,10 @@ function AdminMonthCalendar({
         day ? (
           <button
             key={day.date}
-            className={`admin-calendar-day ${day.date === selectedDate ? "admin-calendar-day-selected" : ""}`}
+            className={[
+              "admin-calendar-day",
+              day.date === selectedDate ? "admin-calendar-day-selected" : "",
+            ].join(" ")}
             type="button"
             onClick={() => onSelectDay(day.date)}
           >
@@ -1978,7 +1994,12 @@ function explanationStatusText(value: AttendanceExplanationStatus): string {
 function dayDotClass(day: AttendanceDaySummary): string {
   if (day.impacted_by_outage) return "calendar-dot-outage";
   if (day.explanations.some((item) => item.status === "pending")) return "calendar-dot-outage";
+  if (isTodayInProgress(day)) return "calendar-dot-live";
   if (day.late_minutes > 0 || day.early_leave_minutes > 0) return "calendar-dot-issue";
   if (day.status === "in_progress") return "calendar-dot-progress";
   return "calendar-dot-complete";
+}
+
+function isTodayInProgress(day: AttendanceDaySummary): boolean {
+  return day.date === localISODate(new Date()) && Boolean(day.check_in_at) && !day.check_out_at;
 }

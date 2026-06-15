@@ -87,18 +87,8 @@ func (m *HeartbeatMonitor) outageInput(
 	endedAt time.Time,
 	location *time.Location,
 ) domain.CreateSystemOutageInput {
-	impacts := m.impactsWorkHours(startedAt, endedAt, location)
-	var affected *time.Time
-	if impacts {
-		date := time.Date(
-			startedAt.In(location).Year(),
-			startedAt.In(location).Month(),
-			startedAt.In(location).Day(),
-			0, 0, 0, 0,
-			location,
-		)
-		affected = &date
-	}
+	affected := m.firstImpactedBusinessDate(startedAt, endedAt, location)
+	impacts := affected != nil
 
 	return domain.CreateSystemOutageInput{
 		StartedAt:            startedAt,
@@ -107,6 +97,35 @@ func (m *HeartbeatMonitor) outageInput(
 		AffectedBusinessDate: affected,
 		ImpactsWorkHours:     impacts,
 	}
+}
+
+func (m *HeartbeatMonitor) firstImpactedBusinessDate(
+	startedAt time.Time,
+	endedAt time.Time,
+	location *time.Location,
+) *time.Time {
+	startClock, err := time.Parse("15:04", m.cfg.OutageImpactStart)
+	if err != nil {
+		return nil
+	}
+	endClock, err := time.Parse("15:04", m.cfg.OutageImpactEnd)
+	if err != nil {
+		return nil
+	}
+
+	for day := normalizeDay(startedAt.In(location)); !day.After(normalizeDay(endedAt.In(location))); day = day.AddDate(0, 0, 1) {
+		if !isBusinessWeekday(day) {
+			continue
+		}
+		windowStart := time.Date(day.Year(), day.Month(), day.Day(), startClock.Hour(), startClock.Minute(), 0, 0, location)
+		windowEnd := time.Date(day.Year(), day.Month(), day.Day(), endClock.Hour(), endClock.Minute(), 0, 0, location)
+		if startedAt.Before(windowEnd) && endedAt.After(windowStart) {
+			date := day
+			return &date
+		}
+	}
+
+	return nil
 }
 
 func (m *HeartbeatMonitor) impactsWorkHours(
@@ -132,6 +151,11 @@ func (m *HeartbeatMonitor) impactsWorkHours(
 	}
 
 	return false
+}
+
+func isBusinessWeekday(date time.Time) bool {
+	weekday := date.Weekday()
+	return weekday != time.Saturday && weekday != time.Sunday
 }
 
 func normalizeDay(value time.Time) time.Time {

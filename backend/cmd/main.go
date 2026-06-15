@@ -66,7 +66,7 @@ func main() {
 	usersHandler := handler.NewUsersHandler(usersService)
 	authHandler := handler.NewAuthHandler(cfg, usersService, sessionsService, adminService)
 	attendanceHandler := handler.NewAttendanceHandler(attendanceService)
-	reportMailer := mailer.NewReportMailer(cfg, adminService, log)
+	reportMailer := mailer.NewReportMailer(cfg, adminService, excelService, log)
 	reportMailer.Start(context.Background())
 	heartbeatMonitor := system.NewHeartbeatMonitor(cfg, adminRepository, log)
 	heartbeatMonitor.Start(context.Background())

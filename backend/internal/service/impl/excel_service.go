@@ -57,9 +57,8 @@ func (s *ExcelService) BuildMonthlyReport(
 		return nil, err
 	}
 
-	period := from.Format("2006-01")
 	return &domain.ExcelReportFile{
-		Filename:    fmt.Sprintf("attendance-%s.xls", period),
+		Filename:    excelFilename(from, to),
 		ContentType: "application/vnd.ms-excel; charset=utf-8",
 		Data:        data,
 	}, nil
@@ -198,7 +197,7 @@ func writeSummarySheet(
 ) {
 	buffer.WriteString(`<Worksheet ss:Name="Сводка"><Table>`)
 	writeRow(buffer, []excelCell{
-		textCell(fmt.Sprintf("Сводка за %s", excelMonthTitle(overview.From))),
+		textCell(fmt.Sprintf("Сводка за %s", excelPeriodTitle(overview.From, overview.To))),
 	}, "Title")
 	writeRow(buffer, []excelCell{
 		textCell("Период"),
@@ -333,7 +332,47 @@ func minutesToHoursText(minutes int) string {
 	return fmt.Sprintf("%d ч %d мин", hours, rest)
 }
 
-func excelMonthTitle(value time.Time) string {
+func excelFilename(from time.Time, to time.Time) string {
+	return fmt.Sprintf(
+		"Посещаемость-%s-%s.xls",
+		excelFilenameDate(from),
+		excelFilenameDate(to),
+	)
+}
+
+func excelFilenameDate(value time.Time) string {
+	return fmt.Sprintf("%d%s%d", value.Day(), excelMonthGenitive(value.Month()), value.Year())
+}
+
+func excelPeriodTitle(from time.Time, to time.Time) string {
+	if isExcelFullCalendarMonth(from, to) {
+		return fmt.Sprintf("%s %d", excelMonthNominative(from.Month()), from.Year())
+	}
+	if from.Year() == to.Year() && from.Month() == to.Month() {
+		return fmt.Sprintf("%d-%d %s %d", from.Day(), to.Day(), excelMonthGenitive(from.Month()), from.Year())
+	}
+	return fmt.Sprintf(
+		"%d %s %d - %d %s %d",
+		from.Day(),
+		excelMonthGenitive(from.Month()),
+		from.Year(),
+		to.Day(),
+		excelMonthGenitive(to.Month()),
+		to.Year(),
+	)
+}
+
+func isExcelFullCalendarMonth(from time.Time, to time.Time) bool {
+	monthStart := time.Date(from.Year(), from.Month(), 1, 0, 0, 0, 0, from.Location())
+	monthEnd := monthStart.AddDate(0, 1, -1)
+	return sameExcelDate(from, monthStart) && sameExcelDate(to, monthEnd)
+}
+
+func sameExcelDate(left time.Time, right time.Time) bool {
+	return left.Year() == right.Year() && left.Month() == right.Month() && left.Day() == right.Day()
+}
+
+func excelMonthNominative(month time.Month) string {
 	months := [...]string{
 		"январь",
 		"февраль",
@@ -348,5 +387,23 @@ func excelMonthTitle(value time.Time) string {
 		"ноябрь",
 		"декабрь",
 	}
-	return fmt.Sprintf("%s %d", months[int(value.Month())-1], value.Year())
+	return months[int(month)-1]
+}
+
+func excelMonthGenitive(month time.Month) string {
+	months := [...]string{
+		"января",
+		"февраля",
+		"марта",
+		"апреля",
+		"мая",
+		"июня",
+		"июля",
+		"августа",
+		"сентября",
+		"октября",
+		"ноября",
+		"декабря",
+	}
+	return months[int(month)-1]
 }

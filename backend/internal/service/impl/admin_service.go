@@ -818,11 +818,20 @@ func (s *AdminService) impactedDates(ctx context.Context, from time.Time, to tim
 	}
 
 	result := make(map[string]bool, len(outages))
+	location, err := time.LoadLocation(s.cfg.BusinessTimezone)
+	if err != nil {
+		return nil, err
+	}
 	for _, outage := range outages {
-		if !outage.ImpactsWorkHours || outage.AffectedBusinessDate == nil {
-			continue
-		}
-		result[outage.AffectedBusinessDate.Format("2006-01-02")] = true
+		addImpactedOutageDates(
+			result,
+			outage,
+			from,
+			to,
+			location,
+			s.cfg.OutageImpactStart,
+			s.cfg.OutageImpactEnd,
+		)
 	}
 	return result, nil
 }
