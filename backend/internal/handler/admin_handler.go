@@ -17,6 +17,7 @@ import (
 
 type AdminHandler struct {
 	adminService service.AdminService
+	excelService service.ExcelService
 	reportMailer *mailer.ReportMailer
 }
 
@@ -41,9 +42,14 @@ type adminExplanationDecisionRequest struct {
 	CheckOutAt *string `json:"check_out_at"`
 }
 
-func NewAdminHandler(adminService service.AdminService, reportMailer *mailer.ReportMailer) *AdminHandler {
+func NewAdminHandler(
+	adminService service.AdminService,
+	reportMailer *mailer.ReportMailer,
+	excelService service.ExcelService,
+) *AdminHandler {
 	return &AdminHandler{
 		adminService: adminService,
+		excelService: excelService,
 		reportMailer: reportMailer,
 	}
 }
@@ -54,6 +60,7 @@ func (h *AdminHandler) RegisterRoutes(r chi.Router) {
 	r.Post("/admin/access", h.AddAccess)
 	r.Delete("/admin/access/{email}", h.RevokeAccess)
 	r.Get("/admin/reports", h.ListReports)
+	r.Get("/admin/reports/excel", h.DownloadExcelReport)
 	r.Post("/admin/reports/email", h.SendEmailReport)
 	r.Get("/admin/sessions", h.ListSessions)
 	r.Post("/admin/sessions/{sessionID}/revoke", h.RevokeSession)
@@ -161,6 +168,31 @@ func (h *AdminHandler) SendEmailReport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "sent"})
+}
+
+func (h *AdminHandler) DownloadExcelReport(w http.ResponseWriter, r *http.Request) {
+	if h.excelService == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "excel service is not configured"})
+		return
+	}
+
+	from, to, err := adminMonthRange(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid month"})
+		return
+	}
+
+	file, err := h.excelService.BuildMonthlyReport(r.Context(), from, to)
+	if err != nil {
+		h.writeAdminError(w, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", file.ContentType)
+	w.Header().Set("Content-Disposition", `attachment; filename="`+file.Filename+`"`)
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(file.Data)
 }
 
 func (h *AdminHandler) ListSessions(w http.ResponseWriter, r *http.Request) {

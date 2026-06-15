@@ -67,6 +67,30 @@ export async function getAdminReports(): Promise<AdminReportList> {
   return response.json() as Promise<AdminReportList>;
 }
 
+export async function downloadAdminExcelReport(month: string): Promise<void> {
+  const response = await fetch(`/api/admin/reports/excel?${new URLSearchParams({ month })}`, {
+    credentials: "include",
+  });
+
+  await assertAdminResponse(response, "Не удалось скачать Excel отчет");
+
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filenameFromDisposition(response.headers.get("Content-Disposition")) ?? `attendance-${month}.xls`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+}
+
+function filenameFromDisposition(value: string | null): string | null {
+  if (!value) return null;
+  const match = /filename="?([^";]+)"?/i.exec(value);
+  return match?.[1] ?? null;
+}
+
 export async function getAdminAccess(): Promise<AdminAccessList> {
   const response = await fetch("/api/admin/access", {
     credentials: "include",

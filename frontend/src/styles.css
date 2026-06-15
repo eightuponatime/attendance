@@ -1433,6 +1433,7 @@ a {
 
 .live-button,
 .month-picker-button,
+.admin-excel-button,
 .admin-logout-button {
   min-height: 42px;
   border: 1px solid rgb(255 255 255 / 0.24);
@@ -1482,6 +1483,33 @@ a {
   font-size: 14px;
   letter-spacing: 0;
   text-transform: none;
+}
+
+.admin-excel-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  border-color: rgb(92 220 144 / 0.54);
+  color: #ffffff;
+  background: rgb(31 200 91 / 0.18);
+  font-weight: 800;
+}
+
+.admin-excel-button span {
+  color: #ffffff;
+  font-size: 14px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.admin-excel-button:hover {
+  background: rgb(31 200 91 / 0.28);
+}
+
+.admin-excel-button:disabled {
+  opacity: 0.62;
+  cursor: wait;
 }
 
 .admin-logout-button {

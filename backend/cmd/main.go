@@ -60,6 +60,7 @@ func main() {
 	sessionsService := impl.NewSessionsService(cfg, sessionsRepository)
 	attendanceService := impl.NewAttendanceService(cfg, txManager, attendanceRepository, systemRepository)
 	adminService := impl.NewAdminService(cfg, txManager, adminRepository)
+	excelService := impl.NewExcelService(adminService, cfg)
 
 	// ======== handler ========
 	usersHandler := handler.NewUsersHandler(usersService)
@@ -69,7 +70,7 @@ func main() {
 	reportMailer.Start(context.Background())
 	heartbeatMonitor := system.NewHeartbeatMonitor(cfg, adminRepository, log)
 	heartbeatMonitor.Start(context.Background())
-	adminHandler := handler.NewAdminHandler(adminService, reportMailer)
+	adminHandler := handler.NewAdminHandler(adminService, reportMailer, excelService)
 
 	// ======== middleware ========
 	authMiddleware := appMiddleware.NewAuthMiddleware(sessionsService, adminService)

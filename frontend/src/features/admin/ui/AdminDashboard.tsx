@@ -1,8 +1,19 @@
-import { AlertTriangle, ArrowLeft, CalendarDays, ChevronDown, LogOut, Radio, Search, ShieldCheck } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  CalendarDays,
+  ChevronDown,
+  FileSpreadsheet,
+  LogOut,
+  Radio,
+  Search,
+  ShieldCheck,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   addAdminAccess,
   approveAdminExplanation,
+  downloadAdminExcelReport,
   getAdminEmployee,
   getAdminEmployees,
   getAdminExplanations,
@@ -69,6 +80,7 @@ export function AdminDashboard({
   const [query, setQuery] = useState("");
   const [employeeFilter, setEmployeeFilter] = useState<EmployeeFilter>("all");
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
+  const [isDownloadingExcel, setIsDownloadingExcel] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const isLive = month === currentMonth();
   const handleError = useCallback((err: unknown) => {
@@ -175,6 +187,22 @@ export function AdminDashboard({
     });
   }, [employeeFilter, employees, query, suspiciousCounts]);
 
+  const downloadExcel = async () => {
+    setIsDownloadingExcel(true);
+    try {
+      await downloadAdminExcelReport(month);
+      setError(null);
+    } catch (err: unknown) {
+      if (isAdminAuthError(err)) {
+        onAuthLost();
+        return;
+      }
+      setError(errorText(err));
+    } finally {
+      setIsDownloadingExcel(false);
+    }
+  };
+
   return (
     <section className="admin-page">
       <header className="admin-topbar">
@@ -194,6 +222,18 @@ export function AdminDashboard({
             )}
 
             <MonthPicker reports={reports} value={month} onChange={setMonth} />
+
+            <button
+              className="admin-excel-button"
+              type="button"
+              aria-label="Скачать Excel отчет"
+              title="Скачать Excel отчет"
+              disabled={isDownloadingExcel}
+              onClick={() => void downloadExcel()}
+            >
+              <FileSpreadsheet size={18} />
+              <span>{isDownloadingExcel ? "Готовим" : "Excel"}</span>
+            </button>
           </div>
 
           <button

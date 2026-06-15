@@ -57,3 +57,7 @@ type AdminService interface {
 	ApproveExplanation(ctx context.Context, input domain.AdminExplanationDecisionInput) error
 	RejectExplanation(ctx context.Context, input domain.AdminExplanationDecisionInput) error
 }
+
+type ExcelService interface {
+	BuildMonthlyReport(ctx context.Context, from time.Time, to time.Time) (*domain.ExcelReportFile, error)
+}

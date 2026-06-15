@@ -7,5 +7,6 @@ frontend/.codex
 google_inst.txt
 adb.sh
 qr_maker.go
+.swn
 .swo
 .swp
