@@ -29,10 +29,8 @@ export function HomeScreen({
   onCheckOut,
 }: HomeScreenProps) {
   const { locale, t } = useI18n();
-  const lateMinutes = today ? today.late_minutes || lateMinutesFromCheckIn(today.check_in?.event_at ?? null) : 0;
-  const earlyLeaveMinutes = today
-    ? today.early_leave_minutes || earlyLeaveMinutesFromCheckOut(today.check_out?.event_at ?? null)
-    : 0;
+  const lateMinutes = today?.late_minutes ?? 0;
+  const earlyLeaveMinutes = today?.early_leave_minutes ?? 0;
   const statusText = today?.check_in
     ? today.check_out
       ? t("home.status.done")
@@ -153,36 +151,4 @@ function HistoryRow({ kind, title, eventAt, active, rightText, rightTone, note, 
       )}
     </div>
   );
-}
-
-function lateMinutesFromCheckIn(eventAt: string | null): number {
-  if (!eventAt) {
-    return 0;
-  }
-
-  const checkIn = new Date(eventAt);
-  const workdayStart = new Date(checkIn);
-  workdayStart.setHours(8, 0, 0, 0);
-
-  if (checkIn <= workdayStart) {
-    return 0;
-  }
-
-  return Math.ceil((checkIn.getTime() - workdayStart.getTime()) / 60_000);
-}
-
-function earlyLeaveMinutesFromCheckOut(eventAt: string | null): number {
-  if (!eventAt) {
-    return 0;
-  }
-
-  const checkOut = new Date(eventAt);
-  const workdayEnd = new Date(checkOut);
-  workdayEnd.setHours(17, 0, 0, 0);
-
-  if (checkOut >= workdayEnd) {
-    return 0;
-  }
-
-  return Math.ceil((workdayEnd.getTime() - checkOut.getTime()) / 60_000);
 }

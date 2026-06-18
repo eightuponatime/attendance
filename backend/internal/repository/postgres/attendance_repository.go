@@ -136,20 +136,41 @@ func (r *AttendanceRepository) GetRangeEventRows(
 ) ([]domain.AttendanceRangeEventRow, error) {
 	const query = `
 		select
-			ar.business_date,
+			day_rows.business_date,
 			ci.event_at as check_in_at,
-			co.event_at as check_out_at
-		from attendance_records ar
+			co.event_at as check_out_at,
+			coalesce(ado.status = 'voided' and ado.restored_at is null, false) as voided,
+			ado.reason as void_reason,
+			ado.created_by_admin_email as voided_by_admin,
+			ado.created_at as voided_at
+		from (
+			select business_date
+			from attendance_records
+			where user_id = $1
+				and business_date >= $2
+				and business_date <= $3
+			union
+			select business_date
+			from attendance_day_overrides
+			where user_id = $1
+				and business_date >= $2
+				and business_date <= $3
+				and restored_at is null
+		) day_rows
+		left join attendance_records ar
+			on ar.user_id = $1
+			and ar.business_date = day_rows.business_date
 		left join attendance_events ci
 			on ci.record_id = ar.id
 			and ci.event_type = 'check_in'
 		left join attendance_events co
 			on co.record_id = ar.id
 			and co.event_type = 'check_out'
-		where ar.user_id = $1
-			and ar.business_date >= $2
-			and ar.business_date <= $3
-		order by ar.business_date
+		left join attendance_day_overrides ado
+			on ado.user_id = $1
+			and ado.business_date = day_rows.business_date
+			and ado.restored_at is null
+		order by day_rows.business_date
 	`
 
 	q := extractTransaction(ctx, r.db)

@@ -41,6 +41,10 @@ type attendanceDaySummaryResponse struct {
 	EarlyLeaveMinutes int                             `json:"early_leave_minutes"`
 	Status            string                          `json:"status"`
 	ImpactedByOutage  bool                            `json:"impacted_by_outage"`
+	Voided            bool                            `json:"voided"`
+	VoidReason        *string                         `json:"void_reason"`
+	VoidedByAdmin     *string                         `json:"voided_by_admin"`
+	VoidedAt          *time.Time                      `json:"voided_at"`
 	Explanations      []attendanceExplanationResponse `json:"explanations"`
 }
 
@@ -116,6 +120,10 @@ func newAttendanceDaySummaryResponse(day domain.AttendanceDaySummary) attendance
 		EarlyLeaveMinutes: day.EarlyLeaveMinutes,
 		Status:            day.Status,
 		ImpactedByOutage:  day.ImpactedByOutage,
+		Voided:            day.Voided,
+		VoidReason:        day.VoidReason,
+		VoidedByAdmin:     day.VoidedByAdmin,
+		VoidedAt:          day.VoidedAt,
 		Explanations:      explanations,
 	}
 }

@@ -42,6 +42,10 @@ type adminExplanationDecisionRequest struct {
 	CheckOutAt *string `json:"check_out_at"`
 }
 
+type adminDayOverrideRequest struct {
+	Reason string `json:"reason"`
+}
+
 func NewAdminHandler(
 	adminService service.AdminService,
 	reportMailer *mailer.ReportMailer,
@@ -66,6 +70,8 @@ func (h *AdminHandler) RegisterRoutes(r chi.Router) {
 	r.Post("/admin/sessions/{sessionID}/revoke", h.RevokeSession)
 	r.Get("/admin/employees", h.EmployeesMonth)
 	r.Get("/admin/employees/{userID}", h.EmployeeMonth)
+	r.Post("/admin/employees/{userID}/days/{businessDate}/void", h.VoidEmployeeDay)
+	r.Post("/admin/employees/{userID}/days/{businessDate}/restore", h.RestoreEmployeeDay)
 	r.Get("/admin/suspicious-activity", h.SuspiciousActivity)
 	r.Get("/admin/system-outages", h.SystemOutages)
 	r.Get("/admin/system-outages/{outageID}/day", h.SystemOutageDay)
@@ -73,6 +79,8 @@ func (h *AdminHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/admin/explanations", h.ListExplanations)
 	r.Post("/admin/explanations/{explanationID}/approve", h.ApproveExplanation)
 	r.Post("/admin/explanations/{explanationID}/reject", h.RejectExplanation)
+	r.Post("/admin/explanations/{explanationID}/rollback", h.RollbackExplanationReview)
+	r.Get("/admin/audit-logs", h.ListAuditLogs)
 }
 
 func (h *AdminHandler) Me(w http.ResponseWriter, r *http.Request) {
@@ -278,6 +286,57 @@ func (h *AdminHandler) SuspiciousActivity(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, newAdminSuspiciousActivityResponse(activity))
 }
 
+func (h *AdminHandler) VoidEmployeeDay(w http.ResponseWriter, r *http.Request) {
+	h.overrideEmployeeDay(w, r, true)
+}
+
+func (h *AdminHandler) RestoreEmployeeDay(w http.ResponseWriter, r *http.Request) {
+	h.overrideEmployeeDay(w, r, false)
+}
+
+func (h *AdminHandler) overrideEmployeeDay(w http.ResponseWriter, r *http.Request, void bool) {
+	adminEmail, ok := appMiddleware.AdminEmailFromContext(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+
+	userID, err := uuid.Parse(chi.URLParam(r, "userID"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid user id"})
+		return
+	}
+	businessDate, err := time.Parse("2006-01-02", chi.URLParam(r, "businessDate"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid business date"})
+		return
+	}
+
+	var request adminDayOverrideRequest
+	if err := readJSON(r, &request); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+
+	input := domain.AdminVoidDayInput{
+		UserId:       userID,
+		BusinessDate: businessDate,
+		AdminEmail:   adminEmail,
+		Reason:       request.Reason,
+	}
+	if void {
+		err = h.adminService.VoidAttendanceDay(r.Context(), input)
+	} else {
+		err = h.adminService.RestoreAttendanceDay(r.Context(), input)
+	}
+	if err != nil {
+		h.writeAdminError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+}
+
 func (h *AdminHandler) SystemOutages(w http.ResponseWriter, r *http.Request) {
 	from, to, err := adminMonthRange(r)
 	if err != nil {
@@ -362,12 +421,49 @@ func (h *AdminHandler) ListExplanations(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, newAdminExplanationListResponse(rows))
 }
 
+func (h *AdminHandler) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
+	from, to, err := adminMonthRange(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid month"})
+		return
+	}
+
+	rows, err := h.adminService.ListAuditLogs(r.Context(), from, to)
+	if err != nil {
+		h.writeAdminError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, newAdminAuditLogListResponse(rows))
+}
+
 func (h *AdminHandler) ApproveExplanation(w http.ResponseWriter, r *http.Request) {
 	h.reviewExplanation(w, r, true)
 }
 
 func (h *AdminHandler) RejectExplanation(w http.ResponseWriter, r *http.Request) {
 	h.reviewExplanation(w, r, false)
+}
+
+func (h *AdminHandler) RollbackExplanationReview(w http.ResponseWriter, r *http.Request) {
+	adminEmail, ok := appMiddleware.AdminEmailFromContext(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+
+	explanationID, err := uuid.Parse(chi.URLParam(r, "explanationID"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid explanation id"})
+		return
+	}
+
+	if err := h.adminService.RollbackExplanationReview(r.Context(), explanationID, adminEmail); err != nil {
+		h.writeAdminError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "rolled_back"})
 }
 
 func (h *AdminHandler) reviewExplanation(w http.ResponseWriter, r *http.Request, approve bool) {

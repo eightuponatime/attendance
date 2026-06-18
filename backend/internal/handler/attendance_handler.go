@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"log"
 	"net"
 	"net/http"
 	"strings"
@@ -168,6 +169,7 @@ func (h *AttendanceHandler) writeAttendanceError(w http.ResponseWriter, err erro
 	case errors.Is(err, impl.ErrExplanationUnavailable):
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "explanation is not available for this day"})
 	default:
+		log.Printf("attendance handler: unexpected error: %v", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to mark attendance"})
 	}
 }

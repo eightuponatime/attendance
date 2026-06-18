@@ -114,6 +114,28 @@ type adminExplanationListResponse struct {
 	Items []adminExplanationResponse `json:"items"`
 }
 
+type adminAuditLogListResponse struct {
+	Items []adminAuditLogResponse `json:"items"`
+}
+
+type adminAuditLogResponse struct {
+	Id             string     `json:"id"`
+	AdminEmail     string     `json:"admin_email"`
+	UserId         *string    `json:"user_id"`
+	ExplanationId  *string    `json:"explanation_id"`
+	Email          *string    `json:"email"`
+	FullName       *string    `json:"full_name"`
+	BusinessDate   *string    `json:"business_date"`
+	Action         string     `json:"action"`
+	OldCheckInAt   *time.Time `json:"old_check_in_at"`
+	OldCheckOutAt  *time.Time `json:"old_check_out_at"`
+	NewCheckInAt   *time.Time `json:"new_check_in_at"`
+	NewCheckOutAt  *time.Time `json:"new_check_out_at"`
+	DecisionSource string     `json:"decision_source"`
+	Reason         string     `json:"reason"`
+	CreatedAt      time.Time  `json:"created_at"`
+}
+
 type adminExplanationResponse struct {
 	Id                   string     `json:"id"`
 	UserId               string     `json:"user_id"`
@@ -406,5 +428,50 @@ func newAdminExplanationResponse(row domain.AdminExplanationRow) adminExplanatio
 		ReviewNote:           row.ReviewNote,
 		CreatedAt:            row.CreatedAt,
 		UpdatedAt:            row.UpdatedAt,
+	}
+}
+
+func newAdminAuditLogListResponse(rows []domain.AdminAuditLog) adminAuditLogListResponse {
+	items := make([]adminAuditLogResponse, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, newAdminAuditLogResponse(row))
+	}
+
+	return adminAuditLogListResponse{Items: items}
+}
+
+func newAdminAuditLogResponse(row domain.AdminAuditLog) adminAuditLogResponse {
+	var userId *string
+	if row.UserId != nil {
+		value := row.UserId.String()
+		userId = &value
+	}
+	var explanationId *string
+	if row.ExplanationId != nil {
+		value := row.ExplanationId.String()
+		explanationId = &value
+	}
+	var businessDate *string
+	if row.BusinessDate != nil {
+		value := row.BusinessDate.Format("2006-01-02")
+		businessDate = &value
+	}
+
+	return adminAuditLogResponse{
+		Id:             row.Id.String(),
+		AdminEmail:     row.AdminEmail,
+		UserId:         userId,
+		ExplanationId:  explanationId,
+		Email:          row.Email,
+		FullName:       row.FullName,
+		BusinessDate:   businessDate,
+		Action:         row.Action,
+		OldCheckInAt:   row.OldCheckInAt,
+		OldCheckOutAt:  row.OldCheckOutAt,
+		NewCheckInAt:   row.NewCheckInAt,
+		NewCheckOutAt:  row.NewCheckOutAt,
+		DecisionSource: row.DecisionSource,
+		Reason:         row.Reason,
+		CreatedAt:      row.CreatedAt,
 	}
 }

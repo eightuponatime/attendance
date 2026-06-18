@@ -184,7 +184,7 @@ func (m *ReportMailer) reportHTML(periodTitle string, stats adminReportStats, ro
   <table role="presentation" width="100%%" cellspacing="0" cellpadding="0" style="background:#f3f6fa;padding:28px 16px;">
     <tr>
       <td align="center">
-        <table role="presentation" width="100%%" cellspacing="0" cellpadding="0" style="max-width:640px;border-collapse:separate;border-spacing:0;">
+        <table role="presentation" width="100%%" cellspacing="0" cellpadding="0" style="max-width:760px;border-collapse:separate;border-spacing:0;">
           <tr>
             <td style="padding:28px 30px;border-radius:14px;background:#113650;color:#ffffff;">
               <div style="margin:0 0 12px;color:#c6d4df;font-size:12px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;">Панель HR</div>
@@ -281,12 +281,12 @@ func employeeTable(rows []adminReportEmployeeRow) string {
 		builder.WriteString(`<div style="margin-top:2px;color:#697083;font-size:11px;font-weight:400;">`)
 		builder.WriteString(html.EscapeString(row.Email))
 		builder.WriteString(`</div></td>`)
-		builder.WriteString(employeeNumberCell(row.HoursText))
+		builder.WriteString(employeeNumberCell(row.HoursText, hoursTone(row.WorkedMinutes, row.TargetMinutes)))
 		builder.WriteString(employeeNumberCell(fmt.Sprintf("%d", row.WorkedDays)))
-		builder.WriteString(employeeNumberCell(fmt.Sprintf("%d", row.LateCount)))
-		builder.WriteString(employeeNumberCell(fmt.Sprintf("%d", row.EarlyLeaveCount)))
-		builder.WriteString(employeeNumberCell(fmt.Sprintf("%d", row.MissingCheckOuts)))
-		builder.WriteString(employeeNumberCell(fmt.Sprintf("%d", row.MissedWorkdays)))
+		builder.WriteString(employeeNumberCell(fmt.Sprintf("%d", row.LateCount), issueTone(row.LateCount)))
+		builder.WriteString(employeeNumberCell(fmt.Sprintf("%d", row.EarlyLeaveCount), issueTone(row.EarlyLeaveCount)))
+		builder.WriteString(employeeNumberCell(fmt.Sprintf("%d", row.MissingCheckOuts), issueTone(row.MissingCheckOuts)))
+		builder.WriteString(employeeNumberCell(fmt.Sprintf("%d", row.MissedWorkdays), issueTone(row.MissedWorkdays)))
 		builder.WriteString(employeeNumberCell(fmt.Sprintf("%d", row.SuspiciousCount)))
 		builder.WriteString(`</tr>`)
 	}
@@ -295,11 +295,37 @@ func employeeTable(rows []adminReportEmployeeRow) string {
 	return builder.String()
 }
 
-func employeeNumberCell(value string) string {
+func employeeNumberCell(value string, tone ...string) string {
+	cellTone := ""
+	if len(tone) > 0 {
+		cellTone = tone[0]
+	}
+	style := "padding:11px 8px;border-bottom:1px solid #edf1f6;color:#071026;font-weight:700;white-space:nowrap;"
+	switch cellTone {
+	case "good":
+		style += "background:#dcfce7;color:#166534;"
+	case "bad":
+		style += "background:#fee2e2;color:#991b1b;"
+	}
 	return fmt.Sprintf(
-		`<td align="right" style="padding:11px 8px;border-bottom:1px solid #edf1f6;color:#071026;font-weight:700;white-space:nowrap;">%s</td>`,
+		`<td align="right" style="%s">%s</td>`,
+		style,
 		html.EscapeString(value),
 	)
+}
+
+func issueTone(value int) string {
+	if value > 0 {
+		return "bad"
+	}
+	return ""
+}
+
+func hoursTone(workedMinutes int, targetMinutes int) string {
+	if workedMinutes >= targetMinutes {
+		return "good"
+	}
+	return "bad"
 }
 
 func reportPeriodTitle(from time.Time, to time.Time) string {
@@ -641,6 +667,8 @@ type adminReportEmployeeRow struct {
 	FullName         string
 	Email            string
 	HoursText        string
+	WorkedMinutes    int
+	TargetMinutes    int
 	WorkedDays       int
 	LateCount        int
 	EarlyLeaveCount  int
@@ -676,6 +704,8 @@ func (m *ReportMailer) reportEmployeeRows(
 			FullName:         detail.FullName,
 			Email:            detail.Email,
 			HoursText:        fmt.Sprintf("%s / %s", reportMinutesText(detail.WorkedMinutes), reportMinutesText(targetMinutes)),
+			WorkedMinutes:    detail.WorkedMinutes,
+			TargetMinutes:    targetMinutes,
 			WorkedDays:       detail.WorkedDays,
 			LateCount:        detail.LateCount,
 			EarlyLeaveCount:  detail.EarlyLeaveCount,

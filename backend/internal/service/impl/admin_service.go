@@ -311,6 +311,9 @@ func (s *AdminService) RepairOutageDay(
 	if strings.TrimSpace(input.ResolutionNote) == "" {
 		return fmt.Errorf("%w: resolution_note is empty", ErrInvalidAdminInput)
 	}
+	if len(input.Items) > 0 {
+		return fmt.Errorf("%w: system outage does not apply attendance changes; use employee requests", ErrInvalidAdminInput)
+	}
 
 	outage, err := s.rp.GetSystemOutageByID(ctx, input.OutageId)
 	if err != nil {
@@ -319,68 +322,11 @@ func (s *AdminService) RepairOutageDay(
 	if outage == nil || outage.AffectedBusinessDate == nil {
 		return fmt.Errorf("%w: outage is not repairable", ErrInvalidAdminInput)
 	}
-
-	businessDate := *outage.AffectedBusinessDate
-	location, err := time.LoadLocation(s.cfg.BusinessTimezone)
-	if err != nil {
-		return err
-	}
-	existingRows, err := s.rp.ListOutageDayEmployees(ctx, businessDate)
-	if err != nil {
-		return err
-	}
-	existingCheckIns := make(map[uuid.UUID]bool, len(existingRows))
-	for _, row := range existingRows {
-		existingCheckIns[row.UserId] = row.CheckInAt != nil
-	}
-
-	for _, item := range input.Items {
-		if item.CheckOutAt != nil && item.CheckInAt == nil && !existingCheckIns[item.UserId] {
-			return fmt.Errorf("%w: check_out requires check_in", ErrInvalidAdminInput)
-		}
-		if item.CheckInAt != nil && isFutureRepairEvent(businessDate, *item.CheckInAt, location) {
-			return fmt.Errorf("%w: check_in cannot be in the future", ErrInvalidAdminInput)
-		}
-		if item.CheckOutAt != nil && isFutureRepairEvent(businessDate, *item.CheckOutAt, location) {
-			return fmt.Errorf("%w: check_out cannot be in the future", ErrInvalidAdminInput)
-		}
+	if outage.ResolvedAt != nil && len(input.Items) == 0 {
+		return nil
 	}
 
 	return s.txManager.WithTransaction(ctx, func(txCtx context.Context) error {
-		for _, item := range input.Items {
-			if item.UserId == uuid.Nil {
-				return fmt.Errorf("%w: user_id is empty", ErrInvalidAdminInput)
-			}
-			if item.CheckInAt != nil {
-				eventAt := repairEventTime(businessDate, *item.CheckInAt, location)
-				if err := s.applyOutageRepairEvent(
-					txCtx,
-					item.UserId,
-					businessDate,
-					AttendanceEventCheckIn,
-					eventAt,
-					input.OutageId,
-					adminEmail,
-				); err != nil {
-					return err
-				}
-			}
-			if item.CheckOutAt != nil {
-				eventAt := repairEventTime(businessDate, *item.CheckOutAt, location)
-				if err := s.applyOutageRepairEvent(
-					txCtx,
-					item.UserId,
-					businessDate,
-					AttendanceEventCheckOut,
-					eventAt,
-					input.OutageId,
-					adminEmail,
-				); err != nil {
-					return err
-				}
-			}
-		}
-
 		return s.rp.ResolveSystemOutage(txCtx, input.OutageId, adminEmail, strings.TrimSpace(input.ResolutionNote))
 	})
 }
@@ -399,6 +345,87 @@ func (s *AdminService) ListExplanations(
 	return s.rp.ListExplanations(ctx, from, to, status)
 }
 
+func (s *AdminService) VoidAttendanceDay(ctx context.Context, input domain.AdminVoidDayInput) error {
+	normalized, err := s.normalizeVoidDayInput(input)
+	if err != nil {
+		return err
+	}
+
+	oldCheckIn, oldCheckOut, err := s.dayEventTimes(ctx, normalized.UserId, normalized.BusinessDate)
+	if err != nil {
+		return err
+	}
+
+	return s.txManager.WithTransaction(ctx, func(txCtx context.Context) error {
+		return s.rp.VoidAttendanceDay(txCtx, normalized, oldCheckIn, oldCheckOut)
+	})
+}
+
+func (s *AdminService) RestoreAttendanceDay(ctx context.Context, input domain.AdminVoidDayInput) error {
+	normalized, err := s.normalizeVoidDayInput(input)
+	if err != nil {
+		return err
+	}
+
+	oldCheckIn, oldCheckOut, err := s.dayEventTimes(ctx, normalized.UserId, normalized.BusinessDate)
+	if err != nil {
+		return err
+	}
+
+	return s.txManager.WithTransaction(ctx, func(txCtx context.Context) error {
+		return s.rp.RestoreAttendanceDay(txCtx, normalized, oldCheckIn, oldCheckOut)
+	})
+}
+
+func (s *AdminService) ListAuditLogs(ctx context.Context, from time.Time, to time.Time) ([]domain.AdminAuditLog, error) {
+	from, to, _, err := s.normalizeAdminRange(from, to)
+	if err != nil {
+		return nil, err
+	}
+	return s.rp.ListAuditLogs(ctx, from, to)
+}
+
+func (s *AdminService) normalizeVoidDayInput(input domain.AdminVoidDayInput) (domain.AdminVoidDayInput, error) {
+	if input.UserId == uuid.Nil {
+		return domain.AdminVoidDayInput{}, fmt.Errorf("%w: user_id is empty", ErrInvalidAdminInput)
+	}
+	adminEmail, err := normalizeAdminEmail(input.AdminEmail)
+	if err != nil {
+		return domain.AdminVoidDayInput{}, err
+	}
+	reason := strings.TrimSpace(input.Reason)
+	if reason == "" {
+		return domain.AdminVoidDayInput{}, fmt.Errorf("%w: reason is empty", ErrInvalidAdminInput)
+	}
+	location, err := time.LoadLocation(s.cfg.BusinessTimezone)
+	if err != nil {
+		return domain.AdminVoidDayInput{}, err
+	}
+	input.AdminEmail = adminEmail
+	input.Reason = reason
+	if input.DecisionSource == "" {
+		input.DecisionSource = "admin_decision"
+	}
+	if input.DecisionSource != "admin_decision" && input.DecisionSource != "employee_request" {
+		return domain.AdminVoidDayInput{}, fmt.Errorf("%w: decision_source is invalid", ErrInvalidAdminInput)
+	}
+	input.BusinessDate = normalizeDate(input.BusinessDate, location)
+	return input, nil
+}
+
+func (s *AdminService) dayEventTimes(ctx context.Context, userId uuid.UUID, businessDate time.Time) (*time.Time, *time.Time, error) {
+	rows, err := s.rp.ListEmployeeMonthRowsByUser(ctx, userId, businessDate, businessDate)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, row := range rows {
+		if row.BusinessDate != nil {
+			return row.CheckInAt, row.CheckOutAt, nil
+		}
+	}
+	return nil, nil, nil
+}
+
 func (s *AdminService) ApproveExplanation(
 	ctx context.Context,
 	input domain.AdminExplanationDecisionInput,
@@ -410,10 +437,103 @@ func (s *AdminService) RejectExplanation(
 	ctx context.Context,
 	input domain.AdminExplanationDecisionInput,
 ) error {
-	if strings.TrimSpace(input.ReviewNote) == "" {
-		return fmt.Errorf("%w: review_note is empty", ErrInvalidAdminInput)
-	}
 	return s.reviewExplanation(ctx, input, "rejected")
+}
+
+func (s *AdminService) RollbackExplanationReview(
+	ctx context.Context,
+	explanationId uuid.UUID,
+	adminEmail string,
+) error {
+	if explanationId == uuid.Nil {
+		return fmt.Errorf("%w: explanation_id is empty", ErrInvalidAdminInput)
+	}
+	normalizedAdminEmail, err := normalizeAdminEmail(adminEmail)
+	if err != nil {
+		return err
+	}
+
+	explanation, err := s.rp.GetExplanationByID(ctx, explanationId)
+	if err != nil {
+		return err
+	}
+	if explanation == nil {
+		return fmt.Errorf("%w: explanation not found", ErrInvalidAdminInput)
+	}
+	if explanation.Status == "pending" {
+		return fmt.Errorf("%w: explanation is already pending", ErrInvalidAdminInput)
+	}
+
+	auditLogs, err := s.rp.ListAuditLogsByExplanation(ctx, explanationId)
+	if err != nil {
+		return err
+	}
+	if len(auditLogs) == 0 {
+		return fmt.Errorf("%w: explanation has no linked audit trail", ErrInvalidAdminInput)
+	}
+	lastRollbackIndex := -1
+	for index, row := range auditLogs {
+		if row.Action == "explanation_rollback" {
+			lastRollbackIndex = index
+		}
+	}
+	auditLogs = auditLogs[lastRollbackIndex+1:]
+	if len(auditLogs) == 0 {
+		return fmt.Errorf("%w: explanation has no active audit trail", ErrInvalidAdminInput)
+	}
+
+	return s.txManager.WithTransaction(ctx, func(txCtx context.Context) error {
+		for i := len(auditLogs) - 1; i >= 0; i-- {
+			row := auditLogs[i]
+			switch row.Action {
+			case "check_in_changed":
+				if err := s.rp.SetAttendanceEventAt(txCtx, domain.SetAttendanceEventAtInput{
+					UserId:       explanation.UserId,
+					BusinessDate: explanation.BusinessDate,
+					EventType:    AttendanceEventCheckIn,
+					EventAt:      row.OldCheckInAt,
+					Status:       AttendanceStatusNormal,
+				}); err != nil {
+					return err
+				}
+			case "check_out_changed":
+				if err := s.rp.SetAttendanceEventAt(txCtx, domain.SetAttendanceEventAtInput{
+					UserId:       explanation.UserId,
+					BusinessDate: explanation.BusinessDate,
+					EventType:    AttendanceEventCheckOut,
+					EventAt:      row.OldCheckOutAt,
+					Status:       AttendanceStatusNormal,
+				}); err != nil {
+					return err
+				}
+			case "day_voided":
+				if err := s.rp.RestoreAttendanceDay(txCtx, domain.AdminVoidDayInput{
+					UserId:         explanation.UserId,
+					BusinessDate:   explanation.BusinessDate,
+					AdminEmail:     normalizedAdminEmail,
+					Reason:         "Решение по заявке сотрудника отменено",
+					DecisionSource: "employee_request",
+					ExplanationId:  explanation.Id,
+				}, explanation.CheckInAt, explanation.CheckOutAt); err != nil {
+					return err
+				}
+			}
+		}
+
+		if _, err := s.rp.ResetExplanationReview(txCtx, explanationId); err != nil {
+			return err
+		}
+
+		return s.rp.CreateAdminAuditLog(txCtx, domain.AdminAuditInput{
+			AdminEmail:     normalizedAdminEmail,
+			UserId:         explanation.UserId,
+			ExplanationId:  explanation.Id,
+			BusinessDate:   explanation.BusinessDate,
+			Action:         "explanation_rollback",
+			DecisionSource: "employee_request",
+			Reason:         "employee_explanation_rollback",
+		})
+	})
 }
 
 func (s *AdminService) reviewExplanation(
@@ -439,8 +559,37 @@ func (s *AdminService) reviewExplanation(
 	if input.CheckOutAt != nil && input.CheckInAt == nil && explanation.CheckInAt == nil {
 		return fmt.Errorf("%w: check_out requires check_in", ErrInvalidAdminInput)
 	}
+	if explanation.ReasonType == ExplanationReasonVoidDayRequest && (input.CheckInAt != nil || input.CheckOutAt != nil) {
+		return fmt.Errorf("%w: void_day_request cannot include time repair", ErrInvalidAdminInput)
+	}
+	if explanation.ReasonType == ExplanationReasonLate && input.CheckOutAt != nil {
+		return fmt.Errorf("%w: late explanation cannot include check_out repair", ErrInvalidAdminInput)
+	}
+	if explanation.ReasonType == ExplanationReasonEarlyLeave && input.CheckInAt != nil {
+		return fmt.Errorf("%w: early_leave explanation cannot include check_in repair", ErrInvalidAdminInput)
+	}
+	if explanation.ReasonType == ExplanationReasonMissingCheckIn && input.CheckOutAt != nil {
+		return fmt.Errorf("%w: missing_check_in explanation cannot include check_out repair", ErrInvalidAdminInput)
+	}
+	if explanation.ReasonType == ExplanationReasonMissingCheckOut && input.CheckInAt != nil {
+		return fmt.Errorf("%w: missing_check_out explanation cannot include check_in repair", ErrInvalidAdminInput)
+	}
 	if status == "approved" {
 		switch explanation.ReasonType {
+		case ExplanationReasonLate:
+			if input.CheckInAt == nil {
+				return fmt.Errorf("%w: late explanation requires check_in repair", ErrInvalidAdminInput)
+			}
+			if explanation.CheckInAt != nil && sameRepairClock(*input.CheckInAt, *explanation.CheckInAt) {
+				return fmt.Errorf("%w: late explanation requires changed check_in", ErrInvalidAdminInput)
+			}
+		case ExplanationReasonEarlyLeave:
+			if input.CheckOutAt == nil {
+				return fmt.Errorf("%w: early_leave explanation requires check_out repair", ErrInvalidAdminInput)
+			}
+			if explanation.CheckOutAt != nil && sameRepairClock(*input.CheckOutAt, *explanation.CheckOutAt) {
+				return fmt.Errorf("%w: early_leave explanation requires changed check_out", ErrInvalidAdminInput)
+			}
 		case ExplanationReasonMissingDay:
 			if input.CheckInAt == nil && explanation.CheckInAt == nil {
 				return fmt.Errorf("%w: missing_day requires check_in", ErrInvalidAdminInput)
@@ -464,6 +613,11 @@ func (s *AdminService) reviewExplanation(
 		return err
 	}
 	businessDate := explanation.BusinessDate
+	if status == "approved" {
+		if err := s.validateExplanationRepairPolicy(explanation.ReasonType, input); err != nil {
+			return err
+		}
+	}
 	if input.CheckInAt != nil && isFutureRepairEvent(businessDate, *input.CheckInAt, location) {
 		return fmt.Errorf("%w: check_in cannot be in the future", ErrInvalidAdminInput)
 	}
@@ -474,6 +628,27 @@ func (s *AdminService) reviewExplanation(
 
 	return s.txManager.WithTransaction(ctx, func(txCtx context.Context) error {
 		if status == "approved" {
+			if explanation.ReasonType == ExplanationReasonVoidDayRequest {
+				reason := strings.TrimSpace(note)
+				if reason == "" {
+					reason = strings.TrimSpace(explanation.Comment)
+				}
+				if err := s.rp.VoidAttendanceDay(txCtx, domain.AdminVoidDayInput{
+					UserId:         explanation.UserId,
+					BusinessDate:   businessDate,
+					AdminEmail:     adminEmail,
+					Reason:         reason,
+					DecisionSource: "employee_request",
+					ExplanationId:  explanation.Id,
+				}, explanation.CheckInAt, explanation.CheckOutAt); err != nil {
+					return err
+				}
+
+				if _, err := s.rp.UpdateExplanationReview(txCtx, input.ExplanationId, status, adminEmail, note); err != nil {
+					return err
+				}
+				return s.logExplanationReviewAudit(txCtx, explanation, status, adminEmail, note)
+			}
 			if input.CheckInAt != nil {
 				eventAt := repairEventTime(businessDate, *input.CheckInAt, location)
 				if err := s.applyExplanationRepairEvent(
@@ -483,6 +658,7 @@ func (s *AdminService) reviewExplanation(
 					AttendanceEventCheckIn,
 					eventAt,
 					adminEmail,
+					explanation.Id,
 				); err != nil {
 					return err
 				}
@@ -496,14 +672,88 @@ func (s *AdminService) reviewExplanation(
 					AttendanceEventCheckOut,
 					eventAt,
 					adminEmail,
+					explanation.Id,
 				); err != nil {
 					return err
 				}
 			}
 		}
 
-		_, err := s.rp.UpdateExplanationReview(txCtx, input.ExplanationId, status, adminEmail, note)
-		return err
+		if _, err := s.rp.UpdateExplanationReview(txCtx, input.ExplanationId, status, adminEmail, note); err != nil {
+			return err
+		}
+		return s.logExplanationReviewAudit(txCtx, explanation, status, adminEmail, note)
+	})
+}
+
+func (s *AdminService) validateExplanationRepairPolicy(
+	reasonType string,
+	input domain.AdminExplanationDecisionInput,
+) error {
+	switch reasonType {
+	case ExplanationReasonLate:
+		if input.CheckInAt == nil {
+			return nil
+		}
+		startClock, err := parseWorkdayClock(s.cfg.WorkdayStart)
+		if err != nil {
+			return err
+		}
+		if clockBefore(*input.CheckInAt, startClock) {
+			return fmt.Errorf("%w: check_in cannot be before workday start for late explanation", ErrInvalidAdminInput)
+		}
+	case ExplanationReasonEarlyLeave:
+		if input.CheckOutAt == nil {
+			return nil
+		}
+		endClock, err := parseWorkdayClock(s.cfg.WorkdayEnd)
+		if err != nil {
+			return err
+		}
+		if clockAfter(*input.CheckOutAt, endClock) {
+			return fmt.Errorf("%w: check_out cannot be after workday end for early leave explanation", ErrInvalidAdminInput)
+		}
+	}
+	return nil
+}
+
+func clockBefore(value time.Time, clock workdayClock) bool {
+	return value.Hour()*60+value.Minute() < clock.Hour*60+clock.Minute
+}
+
+func clockAfter(value time.Time, clock workdayClock) bool {
+	return value.Hour()*60+value.Minute() > clock.Hour*60+clock.Minute
+}
+
+func sameRepairClock(left time.Time, right time.Time) bool {
+	return left.Hour() == right.Hour() && left.Minute() == right.Minute()
+}
+
+func (s *AdminService) logExplanationReviewAudit(
+	ctx context.Context,
+	explanation *domain.AdminExplanationRow,
+	status string,
+	adminEmail string,
+	note string,
+) error {
+	action := "explanation_approved"
+	reason := "employee_explanation_approved"
+	if status == "rejected" {
+		action = "explanation_rejected"
+		reason = "employee_explanation_rejected"
+	}
+	if strings.TrimSpace(note) != "" {
+		reason = strings.TrimSpace(note)
+	}
+
+	return s.rp.CreateAdminAuditLog(ctx, domain.AdminAuditInput{
+		AdminEmail:     adminEmail,
+		UserId:         explanation.UserId,
+		ExplanationId:  explanation.Id,
+		BusinessDate:   explanation.BusinessDate,
+		Action:         action,
+		DecisionSource: "employee_request",
+		Reason:         reason,
 	})
 }
 
@@ -514,6 +764,7 @@ func (s *AdminService) applyExplanationRepairEvent(
 	eventType string,
 	eventAt time.Time,
 	adminEmail string,
+	explanationId uuid.UUID,
 ) error {
 	result, err := s.rp.UpsertAttendanceEventAt(ctx, domain.UpsertAttendanceEventAtInput{
 		UserId:       userId,
@@ -537,6 +788,8 @@ func (s *AdminService) applyExplanationRepairEvent(
 		NewEventAt:          result.NewEventAt,
 		Reason:              "employee_explanation_approved",
 		CreatedByAdminEmail: adminEmail,
+		DecisionSource:      "employee_request",
+		ExplanationId:       explanationId,
 	})
 }
 
@@ -572,6 +825,7 @@ func (s *AdminService) applyOutageRepairEvent(
 		Reason:              "system_outage_repair",
 		OutageId:            outageId,
 		CreatedByAdminEmail: adminEmail,
+		DecisionSource:      "admin_decision",
 	})
 }
 
@@ -666,7 +920,19 @@ func (s *AdminService) employeeSummariesFromRows(
 
 		day := s.attendanceDaySummary(*row.BusinessDate, row.CheckInAt, row.CheckOutAt)
 		day.ImpactedByOutage = impactedDates[day.Date.Format("2006-01-02")]
+		if row.Voided {
+			day.Voided = true
+			day.VoidReason = row.VoidReason
+			day.VoidedByAdmin = row.VoidedByAdmin
+			day.VoidedAt = row.VoidedAt
+			day.WorkedMinutes = 0
+			day.LateMinutes = 0
+			day.EarlyLeaveMinutes = 0
+		}
 		summary.AttendanceDays = append(summary.AttendanceDays, day)
+		if row.Voided {
+			continue
+		}
 		summary.WorkedMinutes += day.WorkedMinutes
 		if row.CheckInAt != nil {
 			summary.CheckInCount++
@@ -752,6 +1018,9 @@ func (s *AdminService) adminLateMinutes(businessDate time.Time, checkInAt time.T
 	if err != nil {
 		return 0
 	}
+	if isWeekend(businessDate, location) {
+		return 0
+	}
 	startClock, err := parseWorkdayClock(s.cfg.WorkdayStart)
 	if err != nil {
 		return 0
@@ -768,6 +1037,9 @@ func (s *AdminService) adminLateMinutes(businessDate time.Time, checkInAt time.T
 func (s *AdminService) adminEarlyLeaveMinutes(businessDate time.Time, checkOutAt time.Time) int {
 	location, err := time.LoadLocation(s.cfg.BusinessTimezone)
 	if err != nil {
+		return 0
+	}
+	if isWeekend(businessDate, location) {
 		return 0
 	}
 	endClock, err := parseWorkdayClock(s.cfg.WorkdayEnd)

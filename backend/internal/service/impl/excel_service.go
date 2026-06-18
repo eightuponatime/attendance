@@ -180,6 +180,8 @@ func buildExcelXML(
 	buffer.WriteString(`<Styles>`)
 	buffer.WriteString(`<Style ss:ID="Header"><Font ss:Bold="1"/><Interior ss:Color="#DCEAF7" ss:Pattern="Solid"/></Style>`)
 	buffer.WriteString(`<Style ss:ID="Title"><Font ss:Bold="1" ss:Size="14"/></Style>`)
+	buffer.WriteString(`<Style ss:ID="Good"><Font ss:Bold="1" ss:Color="#166534"/><Interior ss:Color="#DCFCE7" ss:Pattern="Solid"/></Style>`)
+	buffer.WriteString(`<Style ss:ID="Bad"><Font ss:Bold="1" ss:Color="#991B1B"/><Interior ss:Color="#FEE2E2" ss:Pattern="Solid"/></Style>`)
 	buffer.WriteString(`</Styles>`)
 
 	writeSummarySheet(&buffer, overview, details, suspiciousCounts, scope)
@@ -196,6 +198,11 @@ func writeSummarySheet(
 	scope excelReportScope,
 ) {
 	buffer.WriteString(`<Worksheet ss:Name="Сводка"><Table>`)
+	for _, width := range []int{210, 220, 115, 95, 95, 120, 95, 110, 105, 140, 145} {
+		buffer.WriteString(`<Column ss:Width="`)
+		buffer.WriteString(fmt.Sprintf("%d", width))
+		buffer.WriteString(`"/>`)
+	}
 	writeRow(buffer, []excelCell{
 		textCell(fmt.Sprintf("Сводка за %s", excelPeriodTitle(overview.From, overview.To))),
 	}, "Title")
@@ -229,19 +236,25 @@ func writeSummarySheet(
 		missingCheckOuts := missingCheckOutCount(employee.AttendanceDays, scope.FinalizedThrough)
 		missedWorkdays := missedWorkdayCount(employee.AttendanceDays, scope.FinalizedThrough)
 		targetMinutes := plannedWorkdays * overview.TargetMinutesPerDay
+		hoursStyle := ""
+		if employee.WorkedMinutes >= targetMinutes {
+			hoursStyle = "Good"
+		} else {
+			hoursStyle = "Bad"
+		}
 
 		writeRow(buffer, []excelCell{
 			textCell(employee.FullName),
 			textCell(employee.Email),
-			textCell(minutesToHoursText(employee.WorkedMinutes)),
+			styledTextCell(minutesToHoursText(employee.WorkedMinutes), hoursStyle),
 			textCell(minutesToHoursText(targetMinutes)),
 			numberCell(plannedWorkdays),
 			numberCell(employee.WorkedDays),
-			numberCell(employee.LateCount),
-			numberCell(employee.EarlyLeaveCount),
-			numberCell(missingCheckOuts),
+			issueNumberCell(employee.LateCount),
+			issueNumberCell(employee.EarlyLeaveCount),
+			issueNumberCell(missingCheckOuts),
 			numberCell(suspiciousCounts[employee.UserId]),
-			numberCell(missedWorkdays),
+			issueNumberCell(missedWorkdays),
 		}, "")
 	}
 
@@ -290,22 +303,42 @@ func isWorkday(date time.Time) bool {
 type excelCell struct {
 	Value string
 	Type  string
+	Style string
 }
 
 func textCell(value string) excelCell {
 	return excelCell{Value: value, Type: "String"}
 }
 
+func styledTextCell(value string, style string) excelCell {
+	return excelCell{Value: value, Type: "String", Style: style}
+}
+
 func numberCell(value int) excelCell {
 	return excelCell{Value: fmt.Sprintf("%d", value), Type: "Number"}
+}
+
+func styledNumberCell(value int, style string) excelCell {
+	return excelCell{Value: fmt.Sprintf("%d", value), Type: "Number", Style: style}
+}
+
+func issueNumberCell(value int) excelCell {
+	if value > 0 {
+		return styledNumberCell(value, "Bad")
+	}
+	return numberCell(value)
 }
 
 func writeRow(buffer *bytes.Buffer, cells []excelCell, style string) {
 	buffer.WriteString(`<Row>`)
 	for _, cell := range cells {
-		if style != "" {
+		cellStyle := cell.Style
+		if cellStyle == "" {
+			cellStyle = style
+		}
+		if cellStyle != "" {
 			buffer.WriteString(`<Cell ss:StyleID="`)
-			writeEscaped(buffer, style)
+			writeEscaped(buffer, cellStyle)
 			buffer.WriteString(`">`)
 		} else {
 			buffer.WriteString(`<Cell>`)

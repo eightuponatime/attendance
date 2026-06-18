@@ -65,9 +65,16 @@ type AdminRepository interface {
 	GetSystemOutageByID(ctx context.Context, id uuid.UUID) (*domain.SystemOutage, error)
 	ListOutageDayEmployees(ctx context.Context, businessDate time.Time) ([]domain.AdminOutageDayEmployeeRow, error)
 	UpsertAttendanceEventAt(ctx context.Context, input domain.UpsertAttendanceEventAtInput) (*domain.UpsertAttendanceEventAtResult, error)
+	SetAttendanceEventAt(ctx context.Context, input domain.SetAttendanceEventAtInput) error
 	CreateAttendanceAdjustment(ctx context.Context, input domain.CreateAttendanceAdjustmentInput) error
+	VoidAttendanceDay(ctx context.Context, input domain.AdminVoidDayInput, oldCheckInAt *time.Time, oldCheckOutAt *time.Time) error
+	RestoreAttendanceDay(ctx context.Context, input domain.AdminVoidDayInput, oldCheckInAt *time.Time, oldCheckOutAt *time.Time) error
+	CreateAdminAuditLog(ctx context.Context, input domain.AdminAuditInput) error
+	ListAuditLogs(ctx context.Context, from time.Time, to time.Time) ([]domain.AdminAuditLog, error)
+	ListAuditLogsByExplanation(ctx context.Context, explanationId uuid.UUID) ([]domain.AdminAuditLog, error)
 	ResolveSystemOutage(ctx context.Context, outageId uuid.UUID, adminEmail string, note string) error
 	ListExplanations(ctx context.Context, from time.Time, to time.Time, status string) ([]domain.AdminExplanationRow, error)
 	GetExplanationByID(ctx context.Context, id uuid.UUID) (*domain.AdminExplanationRow, error)
 	UpdateExplanationReview(ctx context.Context, id uuid.UUID, status string, adminEmail string, note string) (*domain.AttendanceExplanation, error)
+	ResetExplanationReview(ctx context.Context, id uuid.UUID) (*domain.AttendanceExplanation, error)
 }

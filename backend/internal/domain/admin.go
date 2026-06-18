@@ -103,7 +103,17 @@ type CreateAttendanceAdjustmentInput struct {
 	NewEventAt          time.Time
 	Reason              string
 	OutageId            uuid.UUID
+	ExplanationId       uuid.UUID
 	CreatedByAdminEmail string
+	DecisionSource      string
+}
+
+type SetAttendanceEventAtInput struct {
+	UserId       uuid.UUID
+	BusinessDate time.Time
+	EventType    string
+	EventAt      *time.Time
+	Status       string
 }
 
 type AdminOutageRepairItem struct {
@@ -120,12 +130,16 @@ type AdminOutageRepairInput struct {
 }
 
 type AdminEmployeeMonthRow struct {
-	UserId       uuid.UUID  `db:"user_id"`
-	Email        string     `db:"email"`
-	FullName     string     `db:"full_name"`
-	BusinessDate *time.Time `db:"business_date"`
-	CheckInAt    *time.Time `db:"check_in_at"`
-	CheckOutAt   *time.Time `db:"check_out_at"`
+	UserId        uuid.UUID  `db:"user_id"`
+	Email         string     `db:"email"`
+	FullName      string     `db:"full_name"`
+	BusinessDate  *time.Time `db:"business_date"`
+	CheckInAt     *time.Time `db:"check_in_at"`
+	CheckOutAt    *time.Time `db:"check_out_at"`
+	Voided        bool       `db:"voided"`
+	VoidReason    *string    `db:"void_reason"`
+	VoidedByAdmin *string    `db:"voided_by_admin"`
+	VoidedAt      *time.Time `db:"voided_at"`
 }
 
 type AdminEmployeeMonthSummary struct {
@@ -204,4 +218,57 @@ type AdminExplanationDecisionInput struct {
 	ReviewNote    string
 	CheckInAt     *time.Time
 	CheckOutAt    *time.Time
+}
+
+type AdminDayOverride struct {
+	UserId               uuid.UUID  `db:"user_id"`
+	BusinessDate         time.Time  `db:"business_date"`
+	Status               string     `db:"status"`
+	Reason               string     `db:"reason"`
+	CreatedByAdminEmail  string     `db:"created_by_admin_email"`
+	CreatedAt            time.Time  `db:"created_at"`
+	RestoredByAdminEmail *string    `db:"restored_by_admin_email"`
+	RestoredAt           *time.Time `db:"restored_at"`
+	RestoreReason        *string    `db:"restore_reason"`
+}
+
+type AdminAuditLog struct {
+	Id             uuid.UUID  `db:"id"`
+	AdminEmail     string     `db:"admin_email"`
+	UserId         *uuid.UUID `db:"user_id"`
+	ExplanationId  *uuid.UUID `db:"explanation_id"`
+	Email          *string    `db:"email"`
+	FullName       *string    `db:"full_name"`
+	BusinessDate   *time.Time `db:"business_date"`
+	Action         string     `db:"action"`
+	OldCheckInAt   *time.Time `db:"old_check_in_at"`
+	OldCheckOutAt  *time.Time `db:"old_check_out_at"`
+	NewCheckInAt   *time.Time `db:"new_check_in_at"`
+	NewCheckOutAt  *time.Time `db:"new_check_out_at"`
+	DecisionSource string     `db:"decision_source"`
+	Reason         string     `db:"reason"`
+	CreatedAt      time.Time  `db:"created_at"`
+}
+
+type AdminAuditInput struct {
+	AdminEmail     string
+	UserId         uuid.UUID
+	ExplanationId  uuid.UUID
+	BusinessDate   time.Time
+	Action         string
+	OldCheckInAt   *time.Time
+	OldCheckOutAt  *time.Time
+	NewCheckInAt   *time.Time
+	NewCheckOutAt  *time.Time
+	DecisionSource string
+	Reason         string
+}
+
+type AdminVoidDayInput struct {
+	UserId         uuid.UUID
+	BusinessDate   time.Time
+	AdminEmail     string
+	Reason         string
+	DecisionSource string
+	ExplanationId  uuid.UUID
 }

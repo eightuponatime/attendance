@@ -87,7 +87,7 @@ export function StatsScreen() {
         )}
       </section>
 
-      {selectedDay && <SelectedDayCard day={selectedDay} onSubmitted={loadSummary} />}
+      {selectedDay && <SelectedDayCard day={selectedDay} days={summary?.days ?? [selectedDay]} onSubmitted={loadSummary} />}
     </section>
   );
 }
@@ -225,7 +225,15 @@ function Bar({
   );
 }
 
-function SelectedDayCard({ day, onSubmitted }: { day: AttendanceDaySummary; onSubmitted: () => void }) {
+function SelectedDayCard({
+  day,
+  days,
+  onSubmitted,
+}: {
+  day: AttendanceDaySummary;
+  days: AttendanceDaySummary[];
+  onSubmitted: () => void;
+}) {
   const { formatDateString, locale, t } = useI18n();
   return (
     <section className="stats-card selected-day-card">
@@ -255,7 +263,7 @@ function SelectedDayCard({ day, onSubmitted }: { day: AttendanceDaySummary; onSu
         />
         <Metric label={t("stats.worked")} value={day.worked_minutes > 0 ? minutesToClock(day.worked_minutes) : "0:00"} />
       </div>
-      <AttendanceExplanationBox day={day} onSubmitted={onSubmitted} />
+      <AttendanceExplanationBox day={day} days={days} onSubmitted={onSubmitted} />
     </section>
   );
 }

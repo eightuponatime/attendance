@@ -63,6 +63,14 @@ export async function submitAttendanceExplanation(payload: {
   return response.json() as Promise<AttendanceExplanation>;
 }
 
+export async function submitAttendanceExplanations(payloads: Array<{
+  business_date: string;
+  reason_type: AttendanceExplanationReason;
+  comment: string;
+}>): Promise<AttendanceExplanation[]> {
+  return Promise.all(payloads.map((payload) => submitAttendanceExplanation(payload)));
+}
+
 async function markAttendance(
   url: string,
   payload: AttendanceMarkPayload,

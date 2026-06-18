@@ -1,6 +1,7 @@
 import type {
   AdminAccess,
   AdminAccessList,
+  AdminAuditLogList,
   AdminEmployeeMonthDetail,
   AdminEmployeesMonth,
   AdminExplanationDecision,
@@ -165,6 +166,46 @@ export async function getAdminEmployee(
   return response.json() as Promise<AdminEmployeeMonthDetail>;
 }
 
+export async function voidAdminEmployeeDay(
+  userId: string,
+  businessDate: string,
+  reason: string,
+): Promise<void> {
+  const response = await fetch(`/api/admin/employees/${userId}/days/${businessDate}/void`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ reason }),
+  });
+
+  await assertAdminResponse(response, "Не удалось аннулировать день");
+}
+
+export async function restoreAdminEmployeeDay(
+  userId: string,
+  businessDate: string,
+  reason: string,
+): Promise<void> {
+  const response = await fetch(`/api/admin/employees/${userId}/days/${businessDate}/restore`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ reason }),
+  });
+
+  await assertAdminResponse(response, "Не удалось восстановить день");
+}
+
+export async function getAdminAuditLogs(month: string): Promise<AdminAuditLogList> {
+  const response = await fetch(`/api/admin/audit-logs?${new URLSearchParams({ month })}`, {
+    credentials: "include",
+  });
+
+  await assertAdminResponse(response, "Не удалось получить журнал аудита");
+
+  return response.json() as Promise<AdminAuditLogList>;
+}
+
 export async function getAdminSuspiciousActivity(
   month: string,
 ): Promise<AdminSuspiciousActivity> {
@@ -225,6 +266,15 @@ export async function rejectAdminExplanation(
   });
 
   await assertAdminResponse(response, "Не удалось отклонить заявку");
+}
+
+export async function rollbackAdminExplanation(explanationId: string): Promise<void> {
+  const response = await fetch(`/api/admin/explanations/${explanationId}/rollback`, {
+    method: "POST",
+    credentials: "include",
+  });
+
+  await assertAdminResponse(response, "Не удалось вернуть заявку на рассмотрение");
 }
 
 export async function getAdminOutageDay(outageId: string): Promise<AdminOutageDay> {

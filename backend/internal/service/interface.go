@@ -53,9 +53,13 @@ type AdminService interface {
 	ListSystemOutages(ctx context.Context, from time.Time, to time.Time) ([]domain.SystemOutage, error)
 	OutageDayEmployees(ctx context.Context, outageId uuid.UUID) (*domain.SystemOutage, []domain.AdminOutageDayEmployeeRow, error)
 	RepairOutageDay(ctx context.Context, input domain.AdminOutageRepairInput) error
+	VoidAttendanceDay(ctx context.Context, input domain.AdminVoidDayInput) error
+	RestoreAttendanceDay(ctx context.Context, input domain.AdminVoidDayInput) error
+	ListAuditLogs(ctx context.Context, from time.Time, to time.Time) ([]domain.AdminAuditLog, error)
 	ListExplanations(ctx context.Context, from time.Time, to time.Time, status string) ([]domain.AdminExplanationRow, error)
 	ApproveExplanation(ctx context.Context, input domain.AdminExplanationDecisionInput) error
 	RejectExplanation(ctx context.Context, input domain.AdminExplanationDecisionInput) error
+	RollbackExplanationReview(ctx context.Context, explanationId uuid.UUID, adminEmail string) error
 }
 
 type ExcelService interface {

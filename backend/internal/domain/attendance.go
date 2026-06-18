@@ -55,9 +55,13 @@ type AttendanceToday struct {
 }
 
 type AttendanceRangeEventRow struct {
-	BusinessDate time.Time  `db:"business_date"`
-	CheckInAt    *time.Time `db:"check_in_at"`
-	CheckOutAt   *time.Time `db:"check_out_at"`
+	BusinessDate  time.Time  `db:"business_date"`
+	CheckInAt     *time.Time `db:"check_in_at"`
+	CheckOutAt    *time.Time `db:"check_out_at"`
+	Voided        bool       `db:"voided"`
+	VoidReason    *string    `db:"void_reason"`
+	VoidedByAdmin *string    `db:"voided_by_admin"`
+	VoidedAt      *time.Time `db:"voided_at"`
 }
 
 type AttendanceDaySummary struct {
@@ -69,6 +73,10 @@ type AttendanceDaySummary struct {
 	EarlyLeaveMinutes int
 	Status            string
 	ImpactedByOutage  bool
+	Voided            bool
+	VoidReason        *string
+	VoidedByAdmin     *string
+	VoidedAt          *time.Time
 	Explanations      []AttendanceExplanation
 }
 

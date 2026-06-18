@@ -38,7 +38,8 @@ export type AttendanceExplanationReason =
   | "early_leave"
   | "missing_check_in"
   | "missing_check_out"
-  | "missing_day";
+  | "missing_day"
+  | "void_day_request";
 
 export type AttendanceExplanation = {
   id: string;
@@ -63,6 +64,10 @@ export type AttendanceDaySummary = {
   early_leave_minutes: number;
   status: AttendanceDayStatus;
   impacted_by_outage: boolean;
+  voided: boolean;
+  void_reason: string | null;
+  voided_by_admin: string | null;
+  voided_at: string | null;
   explanations: AttendanceExplanation[];
 };
 
@@ -236,4 +241,38 @@ export type AdminExplanationDecision = {
   review_note?: string;
   check_in_at?: string;
   check_out_at?: string;
+};
+
+export type AdminAuditAction =
+  | "day_voided"
+  | "day_restored"
+  | "check_in_changed"
+  | "check_out_changed"
+  | "explanation_approved"
+  | "explanation_rejected"
+  | "explanation_rollback"
+  | "system_outage_resolved";
+
+export type AdminAuditDecisionSource = "admin_decision" | "employee_request";
+
+export type AdminAuditLog = {
+  id: string;
+  admin_email: string;
+  user_id: string | null;
+  explanation_id: string | null;
+  email: string | null;
+  full_name: string | null;
+  business_date: string | null;
+  action: AdminAuditAction;
+  old_check_in_at: string | null;
+  old_check_out_at: string | null;
+  new_check_in_at: string | null;
+  new_check_out_at: string | null;
+  decision_source: AdminAuditDecisionSource;
+  reason: string;
+  created_at: string;
+};
+
+export type AdminAuditLogList = {
+  items: AdminAuditLog[];
 };

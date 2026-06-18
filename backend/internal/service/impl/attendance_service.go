@@ -31,6 +31,7 @@ const (
 	ExplanationReasonMissingCheckIn  = "missing_check_in"
 	ExplanationReasonMissingCheckOut = "missing_check_out"
 	ExplanationReasonMissingDay      = "missing_day"
+	ExplanationReasonVoidDayRequest  = "void_day_request"
 )
 
 var (
@@ -289,15 +290,26 @@ func (s *AttendanceService) Summary(
 			CheckOutAt:       row.CheckOutAt,
 			Status:           AttendanceSummaryStatusComplete,
 			ImpactedByOutage: impactedDates[dateKey],
+			Voided:           row.Voided,
+			VoidReason:       row.VoidReason,
+			VoidedByAdmin:    row.VoidedByAdmin,
+			VoidedAt:         row.VoidedAt,
 			Explanations:     explanationsByDate[dateKey],
+		}
+		if row.Voided {
+			day.Status = AttendanceSummaryStatusEmpty
+			days = append(days, day)
+			continue
 		}
 
 		if row.CheckInAt == nil {
 			day.Status = AttendanceSummaryStatusEmpty
 		} else {
-			workdayStart := workdayTime(date, location, startClock)
-			if row.CheckInAt.After(workdayStart) {
-				day.LateMinutes = int(math.Ceil(row.CheckInAt.Sub(workdayStart).Minutes()))
+			if !isWeekend(date, location) {
+				workdayStart := workdayTime(date, location, startClock)
+				if row.CheckInAt.After(workdayStart) {
+					day.LateMinutes = int(math.Ceil(row.CheckInAt.Sub(workdayStart).Minutes()))
+				}
 			}
 
 			if row.CheckOutAt == nil {
@@ -307,9 +319,11 @@ func (s *AttendanceService) Summary(
 				}
 			} else {
 				day.WorkedMinutes = positiveMinutes(row.CheckOutAt.Sub(*row.CheckInAt))
-				workdayEnd := workdayTime(date, location, endClock)
-				if row.CheckOutAt.Before(workdayEnd) {
-					day.EarlyLeaveMinutes = int(math.Ceil(workdayEnd.Sub(*row.CheckOutAt).Minutes()))
+				if !isWeekend(date, location) {
+					workdayEnd := workdayTime(date, location, endClock)
+					if row.CheckOutAt.Before(workdayEnd) {
+						day.EarlyLeaveMinutes = int(math.Ceil(workdayEnd.Sub(*row.CheckOutAt).Minutes()))
+					}
 				}
 			}
 		}
@@ -351,6 +365,13 @@ func (s *AttendanceService) SubmitExplanation(
 		return nil, err
 	}
 
+	if normalized.ReasonType == ExplanationReasonVoidDayRequest &&
+		today.CheckIn == nil &&
+		today.CheckOut == nil &&
+		s.isImpactedByOutage(ctx, businessDate) {
+		return nil, ErrExplanationUnavailable
+	}
+
 	if !s.explanationAllowed(businessDate, today, normalized.ReasonType, location) {
 		return nil, ErrExplanationUnavailable
 	}
@@ -387,7 +408,8 @@ func (s *AttendanceService) normalizeExplanationInput(
 		ExplanationReasonEarlyLeave,
 		ExplanationReasonMissingCheckIn,
 		ExplanationReasonMissingCheckOut,
-		ExplanationReasonMissingDay:
+		ExplanationReasonMissingDay,
+		ExplanationReasonVoidDayRequest:
 	default:
 		return domain.CreateAttendanceExplanationInput{}, fmt.Errorf("%w: reason_type is invalid", ErrInvalidAttendanceInput)
 	}
@@ -416,6 +438,8 @@ func (s *AttendanceService) explanationAllowed(
 		return afterReviewTime && today.CheckIn == nil && today.CheckOut != nil
 	case ExplanationReasonMissingDay:
 		return afterReviewTime && !isWeekend(businessDate, location) && today.CheckIn == nil && today.CheckOut == nil
+	case ExplanationReasonVoidDayRequest:
+		return afterReviewTime && (!isWeekend(businessDate, location) || today.CheckIn != nil || today.CheckOut != nil)
 	default:
 		return false
 	}
@@ -544,6 +568,9 @@ func (s *AttendanceService) lateMinutes(businessDate time.Time, checkInAt time.T
 	if err != nil {
 		return 0
 	}
+	if isWeekend(businessDate, location) {
+		return 0
+	}
 
 	startClock, err := parseWorkdayClock(s.cfg.WorkdayStart)
 	if err != nil {
@@ -561,6 +588,9 @@ func (s *AttendanceService) lateMinutes(businessDate time.Time, checkInAt time.T
 func (s *AttendanceService) earlyLeaveMinutes(businessDate time.Time, checkOutAt time.Time) int {
 	location, err := time.LoadLocation(s.cfg.BusinessTimezone)
 	if err != nil {
+		return 0
+	}
+	if isWeekend(businessDate, location) {
 		return 0
 	}
 

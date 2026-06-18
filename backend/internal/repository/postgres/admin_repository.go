@@ -261,25 +261,46 @@ func (r *AdminRepository) ListEmployeeMonthRows(
 	to time.Time,
 ) ([]domain.AdminEmployeeMonthRow, error) {
 	const query = `
+		with employee_dates as (
+			select ar.user_id, ar.business_date
+			from attendance_records ar
+			where ar.business_date >= $1
+				and ar.business_date <= $2
+			union
+			select ado.user_id, ado.business_date
+			from attendance_day_overrides ado
+			where ado.business_date >= $1
+				and ado.business_date <= $2
+				and ado.restored_at is null
+		)
 		select
 			u.id as user_id,
 			u.email,
 			u.full_name,
-			ar.business_date,
+			ed.business_date,
 			ci.event_at as check_in_at,
-			co.event_at as check_out_at
+			co.event_at as check_out_at,
+			coalesce(ado.status = 'voided' and ado.restored_at is null, false) as voided,
+			ado.reason as void_reason,
+			ado.created_by_admin_email as voided_by_admin,
+			ado.created_at as voided_at
 		from users u
+		left join employee_dates ed
+			on ed.user_id = u.id
 		left join attendance_records ar
 			on ar.user_id = u.id
-			and ar.business_date >= $1
-			and ar.business_date <= $2
+			and ar.business_date = ed.business_date
+		left join attendance_day_overrides ado
+			on ado.user_id = u.id
+			and ado.business_date = ed.business_date
+			and ado.restored_at is null
 		left join attendance_events ci
 			on ci.record_id = ar.id
 			and ci.event_type = 'check_in'
 		left join attendance_events co
 			on co.record_id = ar.id
 			and co.event_type = 'check_out'
-		order by u.full_name, u.email, ar.business_date
+		order by u.full_name, u.email, ed.business_date
 	`
 
 	q := extractTransaction(ctx, r.db)
@@ -298,18 +319,41 @@ func (r *AdminRepository) ListEmployeeMonthRowsByUser(
 	to time.Time,
 ) ([]domain.AdminEmployeeMonthRow, error) {
 	const query = `
+		with employee_dates as (
+			select ar.user_id, ar.business_date
+			from attendance_records ar
+			where ar.user_id = $1
+				and ar.business_date >= $2
+				and ar.business_date <= $3
+			union
+			select ado.user_id, ado.business_date
+			from attendance_day_overrides ado
+			where ado.user_id = $1
+				and ado.business_date >= $2
+				and ado.business_date <= $3
+				and ado.restored_at is null
+		)
 		select
 			u.id as user_id,
 			u.email,
 			u.full_name,
-			ar.business_date,
+			ed.business_date,
 			ci.event_at as check_in_at,
-			co.event_at as check_out_at
+			co.event_at as check_out_at,
+			coalesce(ado.status = 'voided' and ado.restored_at is null, false) as voided,
+			ado.reason as void_reason,
+			ado.created_by_admin_email as voided_by_admin,
+			ado.created_at as voided_at
 		from users u
+		left join employee_dates ed
+			on ed.user_id = u.id
 		left join attendance_records ar
 			on ar.user_id = u.id
-			and ar.business_date >= $2
-			and ar.business_date <= $3
+			and ar.business_date = ed.business_date
+		left join attendance_day_overrides ado
+			on ado.user_id = u.id
+			and ado.business_date = ed.business_date
+			and ado.restored_at is null
 		left join attendance_events ci
 			on ci.record_id = ar.id
 			and ci.event_type = 'check_in'
@@ -317,7 +361,7 @@ func (r *AdminRepository) ListEmployeeMonthRowsByUser(
 			on co.record_id = ar.id
 			and co.event_type = 'check_out'
 		where u.id = $1
-		order by ar.business_date
+		order by ed.business_date
 	`
 
 	q := extractTransaction(ctx, r.db)
@@ -348,11 +392,16 @@ func (r *AdminRepository) ListAttendanceEvents(
 		from attendance_events ae
 		join attendance_records ar on ar.id = ae.record_id
 		join users u on u.id = ar.user_id
+		left join attendance_day_overrides ado
+			on ado.user_id = ar.user_id
+			and ado.business_date = ar.business_date
+			and ado.restored_at is null
 		where ar.business_date >= $1
 			and ar.business_date <= $2
 			and ae.status <> 'system_outage'
 			and ae.device_id <> 'admin-adjustment'
 			and ae.external_ip <> 'internal'
+			and ado.user_id is null
 		order by ae.event_at
 	`
 
@@ -554,6 +603,34 @@ func (r *AdminRepository) UpsertAttendanceEventAt(
 	}, nil
 }
 
+func (r *AdminRepository) SetAttendanceEventAt(
+	ctx context.Context,
+	input domain.SetAttendanceEventAtInput,
+) error {
+	q := extractTransaction(ctx, r.db)
+	if input.EventAt == nil {
+		const deleteQuery = `
+			delete from attendance_events ae
+			using attendance_records ar
+			where ae.record_id = ar.id
+				and ar.user_id = $1
+				and ar.business_date = $2
+				and ae.event_type = $3
+		`
+		_, err := q.ExecContext(ctx, deleteQuery, input.UserId, input.BusinessDate, input.EventType)
+		return err
+	}
+
+	_, err := r.UpsertAttendanceEventAt(ctx, domain.UpsertAttendanceEventAtInput{
+		UserId:       input.UserId,
+		BusinessDate: input.BusinessDate,
+		EventType:    input.EventType,
+		EventAt:      *input.EventAt,
+		Status:       input.Status,
+	})
+	return err
+}
+
 func (r *AdminRepository) CreateAttendanceAdjustment(
 	ctx context.Context,
 	input domain.CreateAttendanceAdjustmentInput,
@@ -578,7 +655,7 @@ func (r *AdminRepository) CreateAttendanceAdjustment(
 		outageId = input.OutageId
 	}
 
-	_, err := q.ExecContext(
+	if _, err := q.ExecContext(
 		ctx,
 		query,
 		input.UserId,
@@ -589,8 +666,225 @@ func (r *AdminRepository) CreateAttendanceAdjustment(
 		input.Reason,
 		outageId,
 		input.CreatedByAdminEmail,
+	); err != nil {
+		return err
+	}
+
+	action := "check_in_changed"
+	if input.EventType == "check_out" {
+		action = "check_out_changed"
+	}
+	auditInput := domain.AdminAuditInput{
+		AdminEmail:     input.CreatedByAdminEmail,
+		UserId:         input.UserId,
+		BusinessDate:   input.BusinessDate,
+		Action:         action,
+		DecisionSource: input.DecisionSource,
+		Reason:         input.Reason,
+	}
+	if input.EventType == "check_out" {
+		auditInput.OldCheckOutAt = input.OldEventAt
+		auditInput.NewCheckOutAt = &input.NewEventAt
+	} else {
+		auditInput.OldCheckInAt = input.OldEventAt
+		auditInput.NewCheckInAt = &input.NewEventAt
+	}
+	auditInput.ExplanationId = input.ExplanationId
+
+	return r.createAdminAuditLog(ctx, q, auditInput)
+}
+
+func (r *AdminRepository) VoidAttendanceDay(
+	ctx context.Context,
+	input domain.AdminVoidDayInput,
+	oldCheckInAt *time.Time,
+	oldCheckOutAt *time.Time,
+) error {
+	q := extractTransaction(ctx, r.db)
+	const overrideQuery = `
+		insert into attendance_day_overrides (
+			user_id, business_date, status, reason, created_by_admin_email,
+			restored_by_admin_email, restored_at, restore_reason
+		)
+		values ($1, $2, 'voided', $3, $4, null, null, null)
+		on conflict (user_id, business_date) do update set
+			status = 'voided',
+			reason = excluded.reason,
+			created_by_admin_email = excluded.created_by_admin_email,
+			created_at = now(),
+			restored_by_admin_email = null,
+			restored_at = null,
+			restore_reason = null
+	`
+	if _, err := q.ExecContext(ctx, overrideQuery, input.UserId, input.BusinessDate, input.Reason, input.AdminEmail); err != nil {
+		return err
+	}
+
+	return r.createAdminAuditLog(ctx, q, domain.AdminAuditInput{
+		AdminEmail:     input.AdminEmail,
+		UserId:         input.UserId,
+		ExplanationId:  input.ExplanationId,
+		BusinessDate:   input.BusinessDate,
+		Action:         "day_voided",
+		OldCheckInAt:   oldCheckInAt,
+		OldCheckOutAt:  oldCheckOutAt,
+		DecisionSource: input.DecisionSource,
+		Reason:         input.Reason,
+	})
+}
+
+func (r *AdminRepository) RestoreAttendanceDay(
+	ctx context.Context,
+	input domain.AdminVoidDayInput,
+	oldCheckInAt *time.Time,
+	oldCheckOutAt *time.Time,
+) error {
+	q := extractTransaction(ctx, r.db)
+	const overrideQuery = `
+		update attendance_day_overrides
+		set restored_by_admin_email = $3,
+			restored_at = now(),
+			restore_reason = $4
+		where user_id = $1
+			and business_date = $2
+			and restored_at is null
+	`
+	if _, err := q.ExecContext(ctx, overrideQuery, input.UserId, input.BusinessDate, input.AdminEmail, input.Reason); err != nil {
+		return err
+	}
+
+	return r.createAdminAuditLog(ctx, q, domain.AdminAuditInput{
+		AdminEmail:     input.AdminEmail,
+		UserId:         input.UserId,
+		ExplanationId:  input.ExplanationId,
+		BusinessDate:   input.BusinessDate,
+		Action:         "day_restored",
+		NewCheckInAt:   oldCheckInAt,
+		NewCheckOutAt:  oldCheckOutAt,
+		DecisionSource: input.DecisionSource,
+		Reason:         input.Reason,
+	})
+}
+
+func (r *AdminRepository) createAdminAuditLog(ctx context.Context, q sqlx.ExtContext, input domain.AdminAuditInput) error {
+	const query = `
+		insert into admin_audit_logs (
+			admin_email, user_id, explanation_id, business_date, action,
+			old_check_in_at, old_check_out_at, new_check_in_at, new_check_out_at,
+			decision_source, reason
+		)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+	`
+	decisionSource := input.DecisionSource
+	if decisionSource == "" {
+		decisionSource = "admin_decision"
+	}
+	var userId any
+	if input.UserId != uuid.Nil {
+		userId = input.UserId
+	}
+	var explanationId any
+	if input.ExplanationId != uuid.Nil {
+		explanationId = input.ExplanationId
+	}
+	var businessDate any
+	if !input.BusinessDate.IsZero() {
+		businessDate = input.BusinessDate
+	}
+	_, err := q.ExecContext(
+		ctx,
+		query,
+		input.AdminEmail,
+		userId,
+		explanationId,
+		businessDate,
+		input.Action,
+		input.OldCheckInAt,
+		input.OldCheckOutAt,
+		input.NewCheckInAt,
+		input.NewCheckOutAt,
+		decisionSource,
+		input.Reason,
 	)
 	return err
+}
+
+func (r *AdminRepository) CreateAdminAuditLog(ctx context.Context, input domain.AdminAuditInput) error {
+	q := extractTransaction(ctx, r.db)
+	return r.createAdminAuditLog(ctx, q, input)
+}
+
+func (r *AdminRepository) ListAuditLogs(ctx context.Context, from time.Time, to time.Time) ([]domain.AdminAuditLog, error) {
+	const query = `
+		select
+			l.id,
+			l.admin_email,
+			l.user_id,
+			l.explanation_id,
+			u.email,
+			u.full_name,
+			l.business_date,
+			l.action,
+			l.old_check_in_at,
+			l.old_check_out_at,
+			l.new_check_in_at,
+			l.new_check_out_at,
+			l.decision_source,
+			l.reason,
+			l.created_at
+		from admin_audit_logs l
+		left join users u on u.id = l.user_id
+		where (
+				l.business_date is not null
+				and l.business_date >= $1::date
+				and l.business_date <= $2::date
+			)
+			or (
+				l.business_date is null
+				and l.created_at >= $1
+				and l.created_at < ($2::timestamptz + interval '1 day')
+			)
+		order by l.created_at desc
+	`
+
+	q := extractTransaction(ctx, r.db)
+	rows := make([]domain.AdminAuditLog, 0)
+	if err := sqlx.SelectContext(ctx, q, &rows, query, from, to); err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+func (r *AdminRepository) ListAuditLogsByExplanation(ctx context.Context, explanationId uuid.UUID) ([]domain.AdminAuditLog, error) {
+	const query = `
+		select
+			l.id,
+			l.admin_email,
+			l.user_id,
+			l.explanation_id,
+			u.email,
+			u.full_name,
+			l.business_date,
+			l.action,
+			l.old_check_in_at,
+			l.old_check_out_at,
+			l.new_check_in_at,
+			l.new_check_out_at,
+			l.decision_source,
+			l.reason,
+			l.created_at
+		from admin_audit_logs l
+		left join users u on u.id = l.user_id
+		where l.explanation_id = $1
+		order by l.created_at
+	`
+
+	q := extractTransaction(ctx, r.db)
+	rows := make([]domain.AdminAuditLog, 0)
+	if err := sqlx.SelectContext(ctx, q, &rows, query, explanationId); err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
 func (r *AdminRepository) ResolveSystemOutage(
@@ -605,11 +899,26 @@ func (r *AdminRepository) ResolveSystemOutage(
 			resolved_by = $2,
 			resolution_note = $3
 		where id = $1
+		returning affected_business_date
 	`
 
 	q := extractTransaction(ctx, r.db)
-	_, err := q.ExecContext(ctx, query, outageId, adminEmail, note)
-	return err
+	var affectedBusinessDate sql.NullTime
+	if err := sqlx.GetContext(ctx, q, &affectedBusinessDate, query, outageId, adminEmail, note); err != nil {
+		return err
+	}
+
+	var businessDate time.Time
+	if affectedBusinessDate.Valid {
+		businessDate = affectedBusinessDate.Time
+	}
+	return r.createAdminAuditLog(ctx, q, domain.AdminAuditInput{
+		AdminEmail:     adminEmail,
+		BusinessDate:   businessDate,
+		Action:         "system_outage_resolved",
+		DecisionSource: "admin_decision",
+		Reason:         "system_outage_resolved",
+	})
 }
 
 func (r *AdminRepository) ListExplanations(
@@ -734,6 +1043,31 @@ func (r *AdminRepository) UpdateExplanationReview(
 	q := extractTransaction(ctx, r.db)
 	var row domain.AttendanceExplanation
 	if err := sqlx.GetContext(ctx, q, &row, query, id, status, adminEmail, note); err != nil {
+		return nil, err
+	}
+
+	return &row, nil
+}
+
+func (r *AdminRepository) ResetExplanationReview(
+	ctx context.Context,
+	id uuid.UUID,
+) (*domain.AttendanceExplanation, error) {
+	const query = `
+		update attendance_explanations
+		set status = 'pending',
+			reviewed_by_admin_email = null,
+			reviewed_at = null,
+			review_note = null,
+			updated_at = now()
+		where id = $1
+		returning id, user_id, business_date, reason_type, comment, status,
+			reviewed_by_admin_email, reviewed_at, review_note, created_at, updated_at
+	`
+
+	q := extractTransaction(ctx, r.db)
+	var row domain.AttendanceExplanation
+	if err := sqlx.GetContext(ctx, q, &row, query, id); err != nil {
 		return nil, err
 	}
 

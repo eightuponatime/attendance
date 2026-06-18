@@ -3,11 +3,15 @@ import {
   ArrowLeft,
   CalendarDays,
   ChevronDown,
+  ClipboardList,
   FileSpreadsheet,
   LogOut,
   Radio,
+  RotateCcw,
   Search,
   ShieldCheck,
+  Trash2,
+  X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -16,6 +20,7 @@ import {
   downloadAdminExcelReport,
   getAdminEmployee,
   getAdminEmployees,
+  getAdminAuditLogs,
   getAdminExplanations,
   getAdminAccess,
   getAdminReports,
@@ -26,17 +31,23 @@ import {
   isAdminAuthError,
   repairAdminOutage,
   rejectAdminExplanation,
+  rollbackAdminExplanation,
+  restoreAdminEmployeeDay,
   revokeAdminAccess,
   revokeAdminSession,
+  voidAdminEmployeeDay,
 } from "../api/adminApi";
 import { errorText } from "../../../shared/api/errors";
 import { ConfirmDialog } from "../../../shared/ui/ConfirmDialog";
 import type {
   AdminAccess,
+  AdminAuditDecisionSource,
+  AdminAuditLog,
   AdminEmployeeMonthDetail,
   AdminEmployeesMonth,
   AdminEmployeeSummary,
   AdminExplanation,
+  AdminExplanationDecision,
   AttendanceExplanationStatus,
   AdminReportRun,
   AdminSession,
@@ -45,7 +56,6 @@ import type {
   AdminSuspiciousIPMatch,
   AdminSystemOutage,
   AdminOutageDay,
-  AdminOutageRepairItem,
   AttendanceDaySummary,
   AdminMe,
 } from "../../../shared/types/api";
@@ -56,8 +66,10 @@ type EmployeeSuspiciousActivity = {
   total: number;
 };
 
-type AdminPageTab = "employees" | "access" | "outages" | "explanations";
+type AdminPageTab = "employees" | "access" | "outages" | "explanations" | "audit";
 type EmployeeFilter = "all" | "late" | "early";
+const DEFAULT_WORKDAY_START = "08:00";
+const DEFAULT_WORKDAY_END = "17:00";
 
 export function AdminDashboard({
   user,
@@ -294,6 +306,13 @@ export function AdminDashboard({
         >
           Управление доступом
         </button>
+        <button
+          className={pageTab === "audit" ? "admin-page-tab-active" : ""}
+          type="button"
+          onClick={() => setPageTab("audit")}
+        >
+          Аудит
+        </button>
       </div>
 
       {pageTab === "employees" ? (
@@ -352,7 +371,13 @@ export function AdminDashboard({
               К списку сотрудников
             </button>
             {selectedEmployee ? (
-              <EmployeeDetail employee={selectedEmployee} suspicious={suspicious} />
+              <EmployeeDetail
+                employee={selectedEmployee}
+                suspicious={suspicious}
+                month={month}
+                onEmployeeChange={setSelectedEmployee}
+                onAuthLost={onAuthLost}
+              />
             ) : (
               <section className="admin-panel">
                 <p className="muted-text">Выберите сотрудника</p>
@@ -361,9 +386,18 @@ export function AdminDashboard({
           </section>
         </div>
       ) : pageTab === "outages" ? (
-        <OutagesPanel outages={outages} onAuthLost={onAuthLost} />
+        <OutagesPanel
+          month={month}
+          outages={outages}
+          onAuthLost={onAuthLost}
+          onOutageUpdated={(updated) => {
+            setOutages((current) => current.map((outage) => (outage.id === updated.id ? updated : outage)));
+          }}
+        />
       ) : pageTab === "explanations" ? (
         <ExplanationsPanel month={month} onPendingChange={setExplanations} onAuthLost={onAuthLost} />
+      ) : pageTab === "audit" ? (
+        <AuditPanel month={month} onAuthLost={onAuthLost} />
       ) : (
         <AccessManagement onAuthLost={onAuthLost} />
       )}
@@ -524,9 +558,15 @@ function Chip({
 function EmployeeDetail({
   employee,
   suspicious,
+  month,
+  onEmployeeChange,
+  onAuthLost,
 }: {
   employee: AdminEmployeeMonthDetail;
   suspicious: AdminSuspiciousActivity | null;
+  month: string;
+  onEmployeeChange: (employee: AdminEmployeeMonthDetail) => void;
+  onAuthLost: () => void;
 }) {
   const markedDays = employee.days.filter((day) => day.status !== "empty");
   const todayDay = employee.days.find((day) => day.date === localISODate(new Date()));
@@ -590,7 +630,15 @@ function EmployeeDetail({
             onSelectDay={setSelectedDate}
           />
 
-          {selectedDay && <SelectedAdminDay day={selectedDay} />}
+          {selectedDay && (
+            <SelectedAdminDay
+              employee={employee}
+              day={selectedDay}
+              month={month}
+              onEmployeeChange={onEmployeeChange}
+              onAuthLost={onAuthLost}
+            />
+          )}
         </>
       ) : (
         <SuspiciousPanel activity={suspiciousForEmployee} />
@@ -647,10 +695,69 @@ function AdminMonthCalendar({
   );
 }
 
-function SelectedAdminDay({ day }: { day: AttendanceDaySummary }) {
+function SelectedAdminDay({
+  employee,
+  day,
+  month,
+  onEmployeeChange,
+  onAuthLost,
+}: {
+  employee: AdminEmployeeMonthDetail;
+  day: AttendanceDaySummary;
+  month: string;
+  onEmployeeChange: (employee: AdminEmployeeMonthDetail) => void;
+  onAuthLost: () => void;
+}) {
+  const [mode, setMode] = useState<"void" | "restore" | null>(null);
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const actionLabel = day.voided ? "Восстановить день" : "Аннулировать день";
+  const reasonLabel = day.voided ? "Причина восстановления" : "Причина аннулирования";
+
+  const submit = async () => {
+    const normalizedReason = reason.trim();
+    if (!normalizedReason) {
+      setError("Укажите причину");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      if (day.voided) {
+        await restoreAdminEmployeeDay(employee.user_id, day.date, normalizedReason);
+      } else {
+        await voidAdminEmployeeDay(employee.user_id, day.date, normalizedReason);
+      }
+      const refreshed = await getAdminEmployee(employee.user_id, month);
+      onEmployeeChange(refreshed);
+      setMode(null);
+      setReason("");
+      setError(null);
+    } catch (err: unknown) {
+      if (isAdminAuthError(err)) {
+        onAuthLost();
+        return;
+      }
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <div className="admin-day-card">
+    <div className={`admin-day-card ${day.voided ? "admin-day-card-voided" : ""}`}>
       <strong>{formatDayLong(day.date)}</strong>
+      {day.voided && (
+        <div className="admin-day-void-note">
+          <span>День аннулирован</span>
+          <b>{day.void_reason}</b>
+          <em>
+            {day.voided_by_admin ? `Администратор: ${day.voided_by_admin}` : "Администратор не указан"}
+            {day.voided_at ? ` · ${formatDateTime(day.voided_at)}` : ""}
+          </em>
+        </div>
+      )}
       {day.impacted_by_outage && (
         <div className="admin-day-outage-note">
           <span>Сбой сервера</span>
@@ -671,6 +778,47 @@ function SelectedAdminDay({ day }: { day: AttendanceDaySummary }) {
         <span>Отработано</span>
         <b>{minutesToClock(day.worked_minutes)}</b>
       </div>
+      <div className="admin-day-danger-zone">
+        <button
+          type="button"
+          className={day.voided ? "admin-day-restore-button" : "admin-day-void-button"}
+          onClick={() => {
+            setMode(day.voided ? "restore" : "void");
+            setReason("");
+            setError(null);
+          }}
+        >
+          {day.voided ? <RotateCcw size={16} /> : <Trash2 size={16} />}
+          {actionLabel}
+        </button>
+      </div>
+      {mode && (
+        <div className="admin-day-override-form">
+          <label>
+            {reasonLabel}
+            <textarea
+              value={reason}
+              rows={3}
+              placeholder={day.voided ? "Например: отпуск отменен, данные снова учитываются" : "Например: сотрудник был в отпуске, день не должен участвовать в статистике"}
+              onChange={(event) => setReason(event.target.value)}
+            />
+          </label>
+          {error && <p className="outage-validation">{error}</p>}
+          <p>
+            {day.voided
+              ? "День снова попадет в статистику, если в нем есть отметки прихода и ухода."
+              : "Исходные отметки останутся в базе, но день не будет учитываться в статистике и подозрительной активности."}
+          </p>
+          <div>
+            <button type="button" onClick={() => { setMode(null); setReason(""); setError(null); }}>
+              Отмена
+            </button>
+            <button type="button" disabled={busy || !reason.trim()} onClick={() => void submit()}>
+              {busy ? "Сохраняем..." : actionLabel}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -754,114 +902,53 @@ function suspiciousRows(activity: EmployeeSuspiciousActivity): Array<{
 }
 
 function OutagesPanel({
+  month,
   outages,
   onAuthLost,
+  onOutageUpdated,
 }: {
+  month: string;
   outages: AdminSystemOutage[];
   onAuthLost: () => void;
+  onOutageUpdated: (outage: AdminSystemOutage) => void;
 }) {
   const impacted = outages.filter((outage) => outage.impacts_work_hours);
   const [selected, setSelected] = useState<AdminOutageDay | null>(null);
-  const [draft, setDraft] = useState<Record<string, { check_in_at: string; check_out_at: string }>>({});
-  const [resolutionNote, setResolutionNote] = useState("");
+  const [relatedRequests, setRelatedRequests] = useState<AdminExplanation[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [confirmRepairOpen, setConfirmRepairOpen] = useState(false);
-  const [editingResolved, setEditingResolved] = useState(false);
-  const [timePicker, setTimePicker] = useState<TimePickerTarget | null>(null);
-  const repairDraft = useMemo(() => buildOutageRepairItems(draft, selected?.employees ?? []), [draft, selected]);
-  const canSaveRepair = repairDraft.items.length > 0 && !repairDraft.hasInvalid && !repairDraft.hasCheckOutWithoutCheckIn && Boolean(resolutionNote.trim());
-  const selectedResolved = Boolean(selected?.outage.resolved_at);
-  const canEditSelected = !selectedResolved || editingResolved;
-  const selectedIsToday = selected?.outage.affected_business_date === localISODate(new Date());
-  const fillButtonText = selectedIsToday ? "Заполнить пустые до текущего времени" : "Заполнить пустые 8:00-17:00";
+  const [loadingDetails, setLoadingDetails] = useState(false);
+
+  const loadOutageDetails = async (outage: AdminSystemOutage) => {
+    setLoadingDetails(true);
+    try {
+      const [data, explanationData] = await Promise.all([
+        getAdminOutageDay(outage.id),
+        getAdminExplanations(month, ""),
+      ]);
+      const affectedDates = outageAffectedDates(data.outage);
+      setSelected(data);
+      setRelatedRequests(
+        explanationData.items.filter((item) => affectedDates.includes(item.business_date)),
+      );
+      setError(null);
+    } catch (err: unknown) {
+      if (isAdminAuthError(err)) {
+        onAuthLost();
+        return;
+      }
+      setError(errorText(err));
+    } finally {
+      setLoadingDetails(false);
+    }
+  };
 
   const openOutage = async (outage: AdminSystemOutage) => {
     if (!outage.impacts_work_hours) return;
-    try {
-      const data = await getAdminOutageDay(outage.id);
-      setSelected(data);
-      setDraft({});
-      setResolutionNote(data.outage.resolution_note ?? "");
-      setConfirmRepairOpen(false);
-      setEditingResolved(false);
-      setTimePicker(null);
-      setError(null);
-    } catch (err: unknown) {
-      if (isAdminAuthError(err)) {
-        onAuthLost();
-        return;
-      }
-      setError(errorText(err));
-    }
-  };
-
-  const setDraftValue = (userId: string, field: "check_in_at" | "check_out_at", value: string) => {
-    setDraft((current) => ({
-      ...current,
-      [userId]: {
-        check_in_at: current[userId]?.check_in_at ?? "",
-        check_out_at: current[userId]?.check_out_at ?? "",
-        [field]: value,
-      },
-    }));
-  };
-
-  const fillStandardDay = () => {
-    if (!selected) return;
-    const next: Record<string, { check_in_at: string; check_out_at: string }> = {};
-    const defaultCheckOut = selectedIsToday ? "" : "17:00";
-    for (const employee of selected.employees) {
-      next[employee.user_id] = {
-        check_in_at: employee.check_in_at ? "" : "8:00",
-        check_out_at: employee.check_out_at ? "" : defaultCheckOut,
-      };
-    }
-    setDraft(next);
-    setResolutionNote((current) => current || (
-      selectedIsToday
-        ? "Заполнены пустые приходы из-за сбоя сервера. Уходы за текущий день не выставлялись заранее."
-        : "Заполнены пустые отметки стандартным рабочим днем 8:00-17:00 из-за сбоя сервера."
-    ));
-  };
-
-  const saveRepair = async () => {
-    if (!selected) return;
-    if (repairDraft.hasInvalid) {
-      setError("Выберите время через селектор");
-      return;
-    }
-    if (repairDraft.hasCheckOutWithoutCheckIn) {
-      setError("Нельзя сохранить уход без прихода");
-      return;
-    }
-    if (repairDraft.items.length === 0) {
-      setError("Нет изменений для сохранения");
-      return;
-    }
-    if (!resolutionNote.trim()) {
-      setError("Добавьте комментарий к исправлению");
-      return;
-    }
-
-    try {
-      await repairAdminOutage(selected.outage.id, resolutionNote, repairDraft.items);
-      const refreshed = await getAdminOutageDay(selected.outage.id);
-      setSelected(refreshed);
-      setDraft({});
-      setConfirmRepairOpen(false);
-      setEditingResolved(false);
-      setError(null);
-    } catch (err: unknown) {
-      if (isAdminAuthError(err)) {
-        onAuthLost();
-        return;
-      }
-      setError(errorText(err));
-    }
+    await loadOutageDetails(outage);
   };
 
   return (
-    <div className="outage-layout">
+    <div className="outage-page">
       <section className="admin-panel outage-panel">
         <div className="admin-panel-header">
           <div>
@@ -896,13 +983,13 @@ function OutagesPanel({
                   </span>
                   <p>
                     {outage.resolved_at
-                      ? `Исправлено${outage.resolved_by ? `: ${outage.resolved_by}` : ""}. Запись сохранена в архиве.`
+                      ? `Проверено${outage.resolved_by ? `: ${outage.resolved_by}` : ""}. Запись сохранена в архиве.`
                       : outage.impacts_work_hours
                       ? "Затронул рабочее окно 06:00-19:00. Данные за день могут быть неполными."
                       : "Не попал в рабочее окно."}
                   </p>
                 </div>
-                <em>{outage.resolved_at ? "Исправлено" : "Требует проверки"}</em>
+                <em>{outage.resolved_at ? "Проверено" : "Требует проверки"}</em>
               </button>
             ))}
           </div>
@@ -910,127 +997,572 @@ function OutagesPanel({
       </section>
 
       {selected && (
-        <section className="admin-panel outage-repair-panel">
-          <div className="admin-panel-header">
-            <div>
-              <span>Исправление дня</span>
-              <h2>{selected.outage.affected_business_date}</h2>
-              <p>Все изменения будут записаны в audit log с вашим email.</p>
-            </div>
-          </div>
-
-          <p className={`outage-warning ${selectedResolved ? "outage-warning-resolved" : ""}`}>
-            {selectedResolved
-              ? "Этот сбой уже исправлен. Данные открыты в режиме архива; повторная правка требует отдельного действия."
-              : "Вы изменяете посещаемость за день, затронутый сбоем сервера. Действие повлияет на статистику сотрудников."}
-          </p>
-
-          <div className="outage-actions">
-            {!selectedResolved || editingResolved ? (
-              <button type="button" onClick={fillStandardDay}>
-                {fillButtonText}
-              </button>
-            ) : (
-              <button type="button" onClick={() => setEditingResolved(true)}>
-                Редактировать исправления
-              </button>
-            )}
-            {editingResolved && (
-              <button type="button" className="outage-secondary-button" onClick={() => { setEditingResolved(false); setDraft({}); }}>
-                Отменить правку
-              </button>
-            )}
-          </div>
-          {repairDraft.hasCheckOutWithoutCheckIn && (
-            <p className="outage-validation">Для ухода нужен приход: выберите приход или очистите уход.</p>
-          )}
-
-          <div className="outage-repair-list">
-            {selected.employees.map((employee) => {
-              const checkInValue = repairTimeValue(draft[employee.user_id]?.check_in_at, employee.check_in_at);
-              const checkOutValue = repairTimeValue(draft[employee.user_id]?.check_out_at, employee.check_out_at);
-              return (
-                <div key={employee.user_id} className="outage-repair-row">
-                  <div>
-                    <strong>{employee.full_name}</strong>
-                    <span>{employee.email}</span>
-                  </div>
-                  <label>
-                    Приход
-                    <TimePickerField
-                      value={checkInValue}
-                      disabled={!canEditSelected || (Boolean(employee.check_in_at) && !editingResolved)}
-                      placeholder="8:00"
-                      onOpen={() => setTimePicker({
-                        userId: employee.user_id,
-                        field: "check_in_at",
-                        businessDate: selected.outage.affected_business_date ?? "",
-                        value: checkInValue,
-                        defaultHour: "08",
-                        maxTime: selectedIsToday ? currentClockValue() : undefined,
-                      })}
-                    />
-                  </label>
-                  <label>
-                    Уход
-                    <TimePickerField
-                      value={checkOutValue}
-                      disabled={!canEditSelected || (Boolean(employee.check_out_at) && !editingResolved)}
-                      placeholder="17:00"
-                      onOpen={() => setTimePicker({
-                        userId: employee.user_id,
-                        field: "check_out_at",
-                        businessDate: selected.outage.affected_business_date ?? "",
-                        value: checkOutValue,
-                        defaultHour: "17",
-                        maxTime: selectedIsToday ? currentClockValue() : undefined,
-                      })}
-                    />
-                  </label>
-                </div>
-              );
-            })}
-          </div>
-
-          <label className="outage-note">
-            Комментарий
-            <textarea
-              value={resolutionNote}
-              rows={3}
-              disabled={!canEditSelected}
-              onChange={(event) => setResolutionNote(event.target.value)}
-            />
-          </label>
-
-          {canEditSelected && (
-            <button
-              className="outage-save-button"
-              type="button"
-              disabled={!canSaveRepair}
-              onClick={() => setConfirmRepairOpen(true)}
-            >
-              Сохранить изменения
-            </button>
-          )}
-        </section>
+        <OutageDetailsDialog
+          data={selected}
+          requests={relatedRequests}
+          loading={loadingDetails}
+          onClose={() => setSelected(null)}
+          onAuthLost={onAuthLost}
+          onOutageUpdated={onOutageUpdated}
+          onReload={() => void loadOutageDetails(selected.outage)}
+          setError={setError}
+        />
       )}
+    </div>
+  );
+}
+
+function OutageDetailsDialog({
+  data,
+  requests,
+  loading,
+  onClose,
+  onAuthLost,
+  onOutageUpdated,
+  onReload,
+  setError,
+}: {
+  data: AdminOutageDay;
+  requests: AdminExplanation[];
+  loading: boolean;
+  onClose: () => void;
+  onAuthLost: () => void;
+  onOutageUpdated: (outage: AdminSystemOutage) => void;
+  onReload: () => void;
+  setError: (value: string | null) => void;
+}) {
+  const affectedDates = useMemo(() => outageAffectedDates(data.outage), [data.outage]);
+  const [selectedDates, setSelectedDates] = useState<string[]>(affectedDates);
+  const [activeIssueTab, setActiveIssueTab] = useState<"requests" | "missing">("requests");
+  const [selectedRequestUserId, setSelectedRequestUserId] = useState<string | null>(null);
+  const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
+  const [selectedMissingUserId, setSelectedMissingUserId] = useState<string | null>(null);
+  const [resolutionNote, setResolutionNote] = useState(data.outage.resolution_note ?? "");
+  const [confirmCloseOpen, setConfirmCloseOpen] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<"approve" | "reject" | null>(null);
+  const [missingReason, setMissingReason] = useState("");
+  const [missingBusy, setMissingBusy] = useState(false);
+  const [timePicker, setTimePicker] = useState<TimePickerTarget | null>(null);
+  const [draft, setDraft] = useState<{ check_in_at: string; check_out_at: string; review_note: string }>({
+    check_in_at: "",
+    check_out_at: "",
+    review_note: "",
+  });
+  const selectedResolved = Boolean(data.outage.resolved_at);
+
+  useEffect(() => {
+    setSelectedDates(affectedDates);
+    setResolutionNote(data.outage.resolution_note ?? "");
+  }, [affectedDates.join("|"), data.outage.id, data.outage.resolution_note]);
+
+  const visibleRequests = useMemo(
+    () => requests.filter((item) => selectedDates.includes(item.business_date)),
+    [requests, selectedDates],
+  );
+  const groupedRequests = useMemo(() => groupExplanationsByUser(visibleRequests), [visibleRequests]);
+  const requestStats = useMemo(() => explanationStats(visibleRequests), [visibleRequests]);
+  const usersWithRequests = useMemo(() => new Set(visibleRequests.map((item) => item.user_id)), [visibleRequests]);
+  const emptyWithoutRequest = useMemo(
+    () => data.employees.filter((employee) => (
+      !employee.check_in_at &&
+      !employee.check_out_at &&
+      !usersWithRequests.has(employee.user_id)
+    )),
+    [data.employees, usersWithRequests],
+  );
+  const selectedRequestGroup = groupedRequests.find((group) => group.userId === selectedRequestUserId) ?? groupedRequests[0] ?? null;
+  const selectedRequest = selectedRequestGroup?.items.find((item) => item.id === selectedRequestId) ??
+    selectedRequestGroup?.items.find((item) => item.status === "pending") ??
+    selectedRequestGroup?.items[0] ??
+    null;
+  const selectedMissing = emptyWithoutRequest.find((item) => item.user_id === selectedMissingUserId) ?? null;
+  const missingBusinessDate = data.outage.affected_business_date ?? selectedDates[0] ?? "";
+
+  useEffect(() => {
+    setSelectedRequestUserId((current) => {
+      if (current && groupedRequests.some((group) => group.userId === current)) return current;
+      return groupedRequests.find((group) => group.items.some((item) => item.status === "pending"))?.userId ??
+        groupedRequests[0]?.userId ??
+        null;
+    });
+  }, [groupedRequests]);
+
+  useEffect(() => {
+    if (!selectedRequestGroup) {
+      setSelectedRequestId(null);
+      return;
+    }
+    setSelectedRequestId((current) => {
+      if (current && selectedRequestGroup.items.some((item) => item.id === current)) return current;
+      return selectedRequestGroup.items.find((item) => item.status === "pending")?.id ?? selectedRequestGroup.items[0]?.id ?? null;
+    });
+  }, [selectedRequestGroup]);
+
+  useEffect(() => {
+    if (!selectedRequest) return;
+    setDraft({
+      check_in_at: "",
+      check_out_at: "",
+      review_note: selectedRequest.review_note ?? "",
+    });
+  }, [selectedRequest?.id]);
+
+  const checkInValue = repairTimeValue(draft.check_in_at, selectedRequest?.check_in_at ?? null);
+  const checkOutValue = repairTimeValue(draft.check_out_at, selectedRequest?.check_out_at ?? null);
+  const hasCheckOutWithoutCheckIn = Boolean(normalizeTimeInput(draft.check_out_at)) && !Boolean(checkInValue);
+  const missingRequiredRepair = selectedRequest
+    ? explanationMissingRequiredRepair(selectedRequest, checkInValue, checkOutValue)
+    : null;
+  const repairPolicyWarning = selectedRequest
+    ? explanationRepairPolicyWarning(selectedRequest, draft.check_in_at, draft.check_out_at)
+    : null;
+  const selectedIsVoidRequest = selectedRequest?.reason_type === "void_day_request";
+  const canEditCheckIn = Boolean(selectedRequest && selectedRequest.status === "pending" && explanationCanRepairCheckIn(selectedRequest.reason_type));
+  const canEditCheckOut = Boolean(selectedRequest && selectedRequest.status === "pending" && explanationCanRepairCheckOut(selectedRequest.reason_type));
+  const canApprove = Boolean(selectedRequest) && !hasCheckOutWithoutCheckIn && !missingRequiredRepair && !repairPolicyWarning;
+  const canReject = Boolean(selectedRequest);
+
+  const toggleDate = (date: string) => {
+    setSelectedDates((current) => {
+      if (current.includes(date) && current.length > 1) {
+        return current.filter((item) => item !== date);
+      }
+      if (current.includes(date)) return current;
+      return [...current, date].sort();
+    });
+  };
+
+  const closeOutage = async () => {
+    try {
+      const note = resolutionNote.trim() || "Сбой проверен. Посещаемость из вкладки сбоев не изменялась; спорные дни обрабатываются через заявки сотрудников.";
+      await repairAdminOutage(data.outage.id, note, []);
+      const refreshed = await getAdminOutageDay(data.outage.id);
+      onOutageUpdated(refreshed.outage);
+      setConfirmCloseOpen(false);
+      setError(null);
+      onReload();
+    } catch (err: unknown) {
+      if (isAdminAuthError(err)) {
+        onAuthLost();
+        return;
+      }
+      setError(errorText(err));
+    }
+  };
+
+  const applyDecision = async (decision: "approve" | "reject") => {
+    if (!selectedRequest) return;
+    const payload = explanationDecisionPayload(selectedRequest, draft);
+
+    try {
+      if (decision === "approve") {
+        await approveAdminExplanation(selectedRequest.id, payload);
+      } else {
+        await rejectAdminExplanation(selectedRequest.id, { review_note: payload.review_note });
+      }
+      setConfirmAction(null);
+      setError(null);
+      onReload();
+    } catch (err: unknown) {
+      if (isAdminAuthError(err)) {
+        onAuthLost();
+        return;
+      }
+      setError(errorText(err));
+    }
+  };
+
+  const voidMissingDay = async () => {
+    if (!selectedMissing || !missingBusinessDate || !missingReason.trim()) return;
+    setMissingBusy(true);
+    try {
+      await voidAdminEmployeeDay(selectedMissing.user_id, missingBusinessDate, missingReason.trim());
+      setMissingReason("");
+      setSelectedMissingUserId(null);
+      setError(null);
+      onReload();
+    } catch (err: unknown) {
+      if (isAdminAuthError(err)) {
+        onAuthLost();
+        return;
+      }
+      setError(errorText(err));
+    } finally {
+      setMissingBusy(false);
+    }
+  };
+
+  return (
+    <div className="outage-dialog-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="outage-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="outage-dialog-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="outage-dialog-header">
+          <div>
+            <span>Разбор инцидента</span>
+            <h2 id="outage-dialog-title">{data.outage.affected_business_date ?? formatDayShort(data.outage.started_at)}</h2>
+            <p>{formatDateTime(data.outage.started_at)} - {formatDateTime(data.outage.ended_at)}</p>
+          </div>
+          <button type="button" aria-label="Закрыть" onClick={onClose}>
+            <X size={20} />
+          </button>
+        </div>
+
+        <p className={`outage-warning ${selectedResolved ? "outage-warning-resolved" : ""}`}>
+          {selectedResolved
+            ? "Сбой уже помечен как проверенный. Решения по сотрудникам остаются в заявках и audit log."
+            : "Сбой группирует связанные заявки и помогает разобрать их вместе. Посещаемость из этого окна меняется только через решение конкретной заявки."}
+        </p>
+
+        <div className="outage-detail-grid">
+          <div>
+            <span>Связанные заявки</span>
+            <strong>{visibleRequests.length}</strong>
+          </div>
+          <div>
+            <span>На рассмотрении</span>
+            <strong>{requestStats.pending}</strong>
+          </div>
+          <div>
+            <span>Пустых дней без заявки</span>
+            <strong>{emptyWithoutRequest.length}</strong>
+          </div>
+          <div>
+            <span>Статус сбоя</span>
+            <strong>{selectedResolved ? "Проверен" : "Требует проверки"}</strong>
+          </div>
+        </div>
+
+        <div className="outage-date-filter">
+          <span>Даты сбоя</span>
+          <div>
+            {affectedDates.map((date) => (
+              <label key={date}>
+                <input
+                  type="checkbox"
+                  checked={selectedDates.includes(date)}
+                  onChange={() => toggleDate(date)}
+                />
+                {formatDayShort(date)}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="outage-dialog-body">
+          <section className="outage-dialog-list">
+            <div className="outage-issue-tabs">
+              <button
+                type="button"
+                className={activeIssueTab === "requests" ? "outage-issue-tab-active" : ""}
+                onClick={() => setActiveIssueTab("requests")}
+              >
+                Заявки <span>{groupedRequests.length}</span>
+              </button>
+              <button
+                type="button"
+                className={activeIssueTab === "missing" ? "outage-issue-tab-active" : ""}
+                onClick={() => setActiveIssueTab("missing")}
+              >
+                Без заявки <span>{emptyWithoutRequest.length}</span>
+              </button>
+            </div>
+
+            {activeIssueTab === "requests" ? (
+              loading ? (
+                <p className="muted-text">Загрузка заявок...</p>
+              ) : groupedRequests.length === 0 ? (
+                <p className="muted-text">По выбранным датам заявок нет.</p>
+              ) : (
+                <div className="outage-compact-table">
+                  {groupedRequests.map((group) => (
+                    <button
+                      key={group.userId}
+                      className={`outage-group-row ${group.userId === selectedRequestGroup?.userId ? "outage-compact-row-active" : ""}`}
+                      type="button"
+                      onClick={() => {
+                        setActiveIssueTab("requests");
+                        setSelectedMissingUserId(null);
+                        setSelectedRequestUserId(group.userId);
+                      }}
+                    >
+                      <strong>{group.fullName}</strong>
+                      <span>
+                        {group.items.length} {requestCountLabel(group.items.length)}
+                        {" · "}
+                        {group.items.filter((item) => item.status === "pending").length} на рассмотрении
+                      </span>
+                      <small>{group.items.map((item) => formatDayShort(item.business_date)).join(", ")}</small>
+                    </button>
+                  ))}
+                </div>
+              )
+            ) : emptyWithoutRequest.length === 0 ? (
+              <p className="muted-text">Нет пустых дней без заявки.</p>
+            ) : (
+              <div className="outage-compact-table">
+                {emptyWithoutRequest.map((employee) => (
+                  <button
+                    key={employee.user_id}
+                    className={employee.user_id === selectedMissingUserId ? "outage-compact-row-active" : ""}
+                    type="button"
+                    onClick={() => {
+                      setActiveIssueTab("missing");
+                      setSelectedMissingUserId(employee.user_id);
+                      setSelectedRequestUserId(null);
+                      setSelectedRequestId(null);
+                      setMissingReason("");
+                    }}
+                  >
+                    <strong>{employee.full_name}</strong>
+                    <span>0</span>
+                    <em>0</em>
+                    <small>{employee.email}</small>
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="outage-dialog-review">
+            {selectedMissing ? (
+              <>
+                <div className="admin-panel-header">
+                  <div>
+                    <span>{formatDayLong(missingBusinessDate)}</span>
+                    <h2>{selectedMissing.full_name}</h2>
+                    <p>{selectedMissing.email}</p>
+                  </div>
+                </div>
+                <div className="explanation-void-admin-note">
+                  <strong>Нет заявки от сотрудника</strong>
+                  <span>Можно аннулировать день, если администратор точно знает причину. Действие попадет в audit log.</span>
+                </div>
+                <label className="outage-note">
+                  Причина аннулирования
+                  <textarea
+                    value={missingReason}
+                    rows={3}
+                    placeholder="Например: сотрудник был в отпуске, день не должен участвовать в статистике"
+                    onChange={(event) => setMissingReason(event.target.value)}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="outage-save-button"
+                  disabled={missingBusy || !missingReason.trim()}
+                  onClick={() => void voidMissingDay()}
+                >
+                  {missingBusy ? "Сохраняем..." : "Аннулировать день"}
+                </button>
+              </>
+            ) : selectedRequest ? (
+              <>
+                <div className="admin-panel-header">
+                  <div>
+                    <span>Заявки сотрудника</span>
+                    <h2>{selectedRequestGroup?.fullName ?? selectedRequest.full_name}</h2>
+                    <p>
+                      {selectedRequestGroup?.email ?? selectedRequest.email}
+                      {selectedRequestGroup ? ` · ${selectedRequestGroup.items.length} ${requestCountLabel(selectedRequestGroup.items.length)}` : ""}
+                    </p>
+                  </div>
+                  <ExplanationAdminStatus status={selectedRequest.status} />
+                </div>
+
+                {selectedRequestGroup && (
+                  <div className="outage-request-group-detail">
+                    <div>
+                      <strong>Дни заявки</strong>
+                      <span>{selectedRequestGroup.items.map((item) => formatDayShort(item.business_date)).join(", ")}</span>
+                    </div>
+                    <div className="outage-request-days-table">
+                      <div>
+                        <span>Дата</span>
+                        <span>Тип</span>
+                        <span>Статус</span>
+                      </div>
+                      {selectedRequestGroup.items.map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          className={item.id === selectedRequest.id ? "outage-request-day-active" : ""}
+                        onClick={() => setSelectedRequestId(item.id)}
+                      >
+                        <span>{formatDayShort(item.business_date)}</span>
+                        <span className={`explanation-type-chip explanation-type-${item.reason_type}`}>{reasonText(item.reason_type)}</span>
+                        <span className={`explanation-mini-status explanation-mini-status-${item.status}`}>{explanationStatusText(item.status)}</span>
+                      </button>
+                    ))}
+                  </div>
+                  </div>
+                )}
+
+                <div className="explanation-review-card">
+                  <span>Выбрана дата: {formatDayLong(selectedRequest.business_date)} · {reasonText(selectedRequest.reason_type)}</span>
+                  <p>{selectedRequest.comment}</p>
+                </div>
+
+                <div className="admin-day-card explanation-current-day">
+                  <div>
+                    <span>Приход сейчас</span>
+                    <b>{selectedRequest.check_in_at ? formatOnlyTime(selectedRequest.check_in_at) : "Нет"}</b>
+                  </div>
+                  <div>
+                    <span>Уход сейчас</span>
+                    <b>{selectedRequest.check_out_at ? formatOnlyTime(selectedRequest.check_out_at) : "Нет"}</b>
+                  </div>
+                </div>
+
+                {selectedIsVoidRequest ? (
+                  <div className="explanation-void-admin-note">
+                    <strong>При одобрении день будет аннулирован</strong>
+                    <span>Исходные отметки останутся в базе, но день перестанет участвовать в статистике и проверке подозрительной активности.</span>
+                  </div>
+                ) : (
+                  <div className="outage-repair-row explanation-time-row">
+                    <div>
+                      <strong>Корректировка времени</strong>
+                      <span>{explanationRepairHint(selectedRequest)}</span>
+                    </div>
+                    <label>
+                      Приход
+                      <TimePickerField
+                        value={checkInValue}
+                        disabled={!canEditCheckIn}
+                        placeholder="8:00"
+                        onOpen={() => setTimePicker({
+                          userId: selectedRequest.id,
+                          field: "check_in_at",
+                          businessDate: selectedRequest.business_date,
+                          value: checkInValue,
+                          defaultHour: "08",
+                          maxTime: selectedRequest.business_date === localISODate(new Date()) ? currentClockValue() : undefined,
+                        })}
+                      />
+                    </label>
+                    <label>
+                      Уход
+                      <TimePickerField
+                        value={checkOutValue}
+                        disabled={!canEditCheckOut}
+                        placeholder="17:00"
+                        onOpen={() => setTimePicker({
+                          userId: selectedRequest.id,
+                          field: "check_out_at",
+                          businessDate: selectedRequest.business_date,
+                          value: checkOutValue,
+                          defaultHour: "17",
+                          maxTime: selectedRequest.business_date === localISODate(new Date()) ? currentClockValue() : undefined,
+                        })}
+                      />
+                    </label>
+                  </div>
+                )}
+
+                {hasCheckOutWithoutCheckIn && <p className="outage-validation">Нельзя сохранить уход без прихода.</p>}
+                {missingRequiredRepair && <p className="outage-validation">{missingRequiredRepair}</p>}
+                {repairPolicyWarning && <p className="outage-validation">{repairPolicyWarning}</p>}
+
+                <label className="outage-note">
+                  Ответ администратора
+                  <textarea
+                    value={draft.review_note}
+                    rows={3}
+                    disabled={selectedRequest.status !== "pending"}
+                    placeholder="Необязательно. Комментарий виден сотруднику"
+                    onChange={(event) => setDraft((current) => ({ ...current, review_note: event.target.value }))}
+                  />
+                </label>
+
+                {selectedRequest.status === "pending" ? (
+                  <div className="explanation-review-actions">
+                    <button type="button" disabled={!canReject} onClick={() => setConfirmAction("reject")}>
+                      Отклонить
+                    </button>
+                    <button type="button" disabled={!canApprove} onClick={() => setConfirmAction("approve")}>
+                      {selectedIsVoidRequest ? "Аннулировать день" : "Одобрить"}
+                    </button>
+                  </div>
+                ) : (
+                  <p className="muted-text">
+                    Рассмотрено {selectedRequest.reviewed_by_admin_email ? selectedRequest.reviewed_by_admin_email : "администратором"}
+                    {selectedRequest.reviewed_at ? ` · ${formatDateTime(selectedRequest.reviewed_at)}` : ""}
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="muted-text">Выберите заявку слева или дождитесь обращений сотрудников.</p>
+            )}
+          </section>
+        </div>
+
+        <div className="outage-dialog-footer">
+          {!selectedResolved ? (
+            <>
+              <label className="outage-note">
+                Комментарий к проверке сбоя
+                <textarea
+                  value={resolutionNote}
+                  rows={2}
+                  placeholder="Необязательно. Например: связанные заявки обработаны отдельно"
+                  onChange={(event) => setResolutionNote(event.target.value)}
+                />
+              </label>
+              <button type="button" className="outage-save-button" onClick={() => setConfirmCloseOpen(true)}>
+                Пометить сбой проверенным
+              </button>
+            </>
+          ) : (
+            <div className="outage-resolved-note">
+              <strong>Проверено{data.outage.resolved_by ? `: ${data.outage.resolved_by}` : ""}</strong>
+              {data.outage.resolution_note && <span>{data.outage.resolution_note}</span>}
+            </div>
+          )}
+        </div>
+      </section>
+
       <TimePickerDialog
         target={timePicker}
         onCancel={() => setTimePicker(null)}
         onSelect={(value) => {
           if (!timePicker) return;
-          setDraftValue(timePicker.userId, timePicker.field, value);
+          setDraft((current) => ({ ...current, [timePicker.field]: value }));
           setTimePicker(null);
         }}
       />
       <ConfirmDialog
-        open={confirmRepairOpen}
-        title="Сохранить исправления?"
-        text="Отметки будут записаны в посещаемость, попадут в статистику сотрудников и сохранятся в audit log с вашим email."
-        confirmText="Сохранить"
+        open={confirmAction !== null}
+        title={confirmAction === "approve" ? (selectedIsVoidRequest ? "Аннулировать день?" : "Одобрить заявку?") : "Отклонить заявку?"}
+        text={
+          confirmAction === "approve"
+            ? selectedIsVoidRequest
+              ? "День будет исключен из статистики. Исходные отметки останутся в базе, действие попадет в audit log."
+              : approvalConfirmText(selectedRequest, draft)
+            : draft.review_note.trim()
+              ? "Сотрудник увидит статус отклонения и комментарий администратора."
+              : "Сотрудник увидит статус отклонения без комментария администратора."
+        }
+        confirmText={confirmAction === "approve" ? (selectedIsVoidRequest ? "Аннулировать" : "Одобрить") : "Отклонить"}
+        tone={confirmAction === "reject" ? "danger" : "neutral"}
+        onConfirm={() => {
+          if (!confirmAction) return;
+          void applyDecision(confirmAction);
+        }}
+        onCancel={() => setConfirmAction(null)}
+      />
+      <ConfirmDialog
+        open={confirmCloseOpen}
+        title="Пометить сбой проверенным?"
+        text="Посещаемость сотрудников не изменится. Сбой уйдет в архив, а заявки сотрудников останутся в истории решений."
+        confirmText="Пометить проверенным"
         tone="neutral"
-        onConfirm={() => void saveRepair()}
-        onCancel={() => setConfirmRepairOpen(false)}
+        onConfirm={() => void closeOutage()}
+        onCancel={() => setConfirmCloseOpen(false)}
       />
     </div>
   );
@@ -1047,7 +1579,9 @@ function ExplanationsPanel({
 }) {
   const [items, setItems] = useState<AdminExplanation[]>([]);
   const [status, setStatus] = useState<AttendanceExplanationStatus | "all">("pending");
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [reviewSheetOpen, setReviewSheetOpen] = useState(false);
   const [draft, setDraft] = useState<{ check_in_at: string; check_out_at: string; review_note: string }>({
     check_in_at: "",
     check_out_at: "",
@@ -1065,12 +1599,6 @@ function ExplanationsPanel({
       const data = await getAdminExplanations(month, status === "all" ? "" : status);
       setItems(data.items);
       onPendingChange(data.items.filter((item) => item.status === "pending"));
-      setSelectedId((current) => {
-        if (current && data.items.some((item) => item.id === current)) {
-          return current;
-        }
-        return data.items[0]?.id ?? null;
-      });
       setError(null);
     } catch (err: unknown) {
       if (isAdminAuthError(err)) {
@@ -1085,8 +1613,33 @@ function ExplanationsPanel({
     void load();
   }, [load]);
 
-  const selected = items.find((item) => item.id === selectedId) ?? items[0] ?? null;
+  const groupedItems = useMemo(() => groupExplanationsByUser(items), [items]);
+  const selectedGroup = groupedItems.find((group) => group.userId === selectedUserId) ?? groupedItems[0] ?? null;
+  const selected = selectedGroup?.items.find((item) => item.id === selectedId) ??
+    selectedGroup?.items.find((item) => item.status === "pending") ??
+    selectedGroup?.items[0] ??
+    null;
   const pendingItems = items.filter((item) => item.status === "pending");
+
+  useEffect(() => {
+    setSelectedUserId((current) => {
+      if (current && groupedItems.some((group) => group.userId === current)) return current;
+      return groupedItems.find((group) => group.items.some((item) => item.status === "pending"))?.userId ??
+        groupedItems[0]?.userId ??
+        null;
+    });
+  }, [groupedItems]);
+
+  useEffect(() => {
+    if (!selectedGroup) {
+      setSelectedId(null);
+      return;
+    }
+    setSelectedId((current) => {
+      if (current && selectedGroup.items.some((item) => item.id === current)) return current;
+      return selectedGroup.items.find((item) => item.status === "pending")?.id ?? selectedGroup.items[0]?.id ?? null;
+    });
+  }, [selectedGroup]);
 
   useEffect(() => {
     if (!selected) return;
@@ -1101,16 +1654,17 @@ function ExplanationsPanel({
   const checkOutValue = repairTimeValue(draft.check_out_at, selected?.check_out_at ?? null);
   const hasCheckOutWithoutCheckIn = Boolean(normalizeTimeInput(draft.check_out_at)) && !Boolean(checkInValue);
   const missingRequiredRepair = selected ? explanationMissingRequiredRepair(selected, checkInValue, checkOutValue) : null;
-  const canApprove = Boolean(selected) && !hasCheckOutWithoutCheckIn && !missingRequiredRepair;
-  const canReject = Boolean(selected) && Boolean(draft.review_note.trim());
+  const repairPolicyWarning = selected ? explanationRepairPolicyWarning(selected, draft.check_in_at, draft.check_out_at) : null;
+  const selectedIsVoidRequest = selected?.reason_type === "void_day_request";
+  const repairHint = selected ? explanationRepairHint(selected) : "Заполняйте только поля, которые нужно изменить.";
+  const canEditCheckIn = Boolean(selected && selected.status === "pending" && explanationCanRepairCheckIn(selected.reason_type));
+  const canEditCheckOut = Boolean(selected && selected.status === "pending" && explanationCanRepairCheckOut(selected.reason_type));
+  const canApprove = Boolean(selected) && !hasCheckOutWithoutCheckIn && !missingRequiredRepair && !repairPolicyWarning;
+  const canReject = Boolean(selected);
 
   const applyDecision = async (decision: "approve" | "reject") => {
     if (!selected) return;
-    const payload = {
-      review_note: draft.review_note.trim() || undefined,
-      check_in_at: normalizeTimeInput(draft.check_in_at),
-      check_out_at: normalizeTimeInput(draft.check_out_at),
-    };
+    const payload = explanationDecisionPayload(selected, draft);
 
     try {
       if (decision === "approve") {
@@ -1131,11 +1685,11 @@ function ExplanationsPanel({
 
   const rejectAll = async () => {
     const note = bulkRejectNote.trim();
-    if (pendingItems.length === 0 || !note) return;
+    if (pendingItems.length === 0) return;
     setBulkRejecting(true);
     try {
       await Promise.all(
-        pendingItems.map((item) => rejectAdminExplanation(item.id, { review_note: note })),
+        pendingItems.map((item) => rejectAdminExplanation(item.id, { review_note: note || undefined })),
       );
       setBulkRejectNote("");
       setConfirmRejectAllOpen(false);
@@ -1188,13 +1742,13 @@ function ExplanationsPanel({
               <textarea
                 value={bulkRejectNote}
                 rows={2}
-                placeholder="Комментарий увидят сотрудники"
+                placeholder="Необязательно. Комментарий увидят сотрудники"
                 onChange={(event) => setBulkRejectNote(event.target.value)}
               />
             </label>
             <button
               type="button"
-              disabled={!bulkRejectNote.trim() || bulkRejecting}
+              disabled={bulkRejecting}
               onClick={() => setConfirmRejectAllOpen(true)}
             >
               {bulkRejecting ? "Отклоняем..." : `Отклонить все (${pendingItems.length})`}
@@ -1204,23 +1758,27 @@ function ExplanationsPanel({
 
         {error && <p className="error-banner">{error}</p>}
 
-        {items.length === 0 ? (
+        {groupedItems.length === 0 ? (
           <p className="muted-text">Заявок за выбранный период нет</p>
         ) : (
           <div className="explanations-list">
-            {items.map((item) => (
+            {groupedItems.map((group) => (
               <button
-                key={item.id}
-                className={`explanation-admin-row ${item.id === selected?.id ? "explanation-admin-row-active" : ""}`}
+                key={group.userId}
+                className={`explanation-admin-row ${group.userId === selectedGroup?.userId ? "explanation-admin-row-active" : ""}`}
                 type="button"
-                onClick={() => setSelectedId(item.id)}
+                onClick={() => {
+                  setSelectedUserId(group.userId);
+                  setSelectedId(group.items.find((item) => item.status === "pending")?.id ?? group.items[0].id);
+                  setReviewSheetOpen(true);
+                }}
               >
                 <div>
-                  <strong>{item.full_name}</strong>
-                  <span>{item.email}</span>
-                  <p>{reasonText(item.reason_type)} · {formatDayShort(item.business_date)}</p>
+                  <strong>{group.fullName}</strong>
+                  <span>{group.email}</span>
+                  <p>{group.items.map((item) => formatDayShort(item.business_date)).join(", ")}</p>
                 </div>
-                <ExplanationAdminStatus status={item.status} />
+                <em className="admin-row-count">{group.items.length}</em>
               </button>
             ))}
           </div>
@@ -1228,105 +1786,155 @@ function ExplanationsPanel({
       </section>
 
       {selected && (
-        <section className="admin-panel explanation-review-panel">
-          <div className="admin-panel-header">
-            <div>
-              <span>{formatDayLong(selected.business_date)}</span>
-              <h2>{selected.full_name}</h2>
-              <p>{selected.email}</p>
-            </div>
-            <ExplanationAdminStatus status={selected.status} />
-          </div>
-
-          <div className="explanation-review-card">
-            <span>{reasonText(selected.reason_type)}</span>
-            <p>{selected.comment}</p>
-          </div>
-
-          <div className="admin-day-card explanation-current-day">
-            <div>
-              <span>Приход сейчас</span>
-              <b>{selected.check_in_at ? formatOnlyTime(selected.check_in_at) : "Нет"}</b>
-            </div>
-            <div>
-              <span>Уход сейчас</span>
-              <b>{selected.check_out_at ? formatOnlyTime(selected.check_out_at) : "Нет"}</b>
-            </div>
-          </div>
-
-          <div className="outage-repair-row explanation-time-row">
-            <div>
-              <strong>Корректировка времени</strong>
-              <span>Заполняйте только поля, которые нужно изменить.</span>
-            </div>
-            <label>
-              Приход
-              <TimePickerField
-                value={checkInValue}
-                disabled={selected.status !== "pending"}
-                placeholder="8:00"
-                onOpen={() => setTimePicker({
-                  userId: selected.id,
-                  field: "check_in_at",
-                  businessDate: selected.business_date,
-                  value: checkInValue,
-                  defaultHour: "08",
-                  maxTime: selected.business_date === localISODate(new Date()) ? currentClockValue() : undefined,
-                })}
-              />
-            </label>
-            <label>
-              Уход
-              <TimePickerField
-                value={checkOutValue}
-                disabled={selected.status !== "pending"}
-                placeholder="17:00"
-                onOpen={() => setTimePicker({
-                  userId: selected.id,
-                  field: "check_out_at",
-                  businessDate: selected.business_date,
-                  value: checkOutValue,
-                  defaultHour: "17",
-                  maxTime: selected.business_date === localISODate(new Date()) ? currentClockValue() : undefined,
-                })}
-              />
-            </label>
-          </div>
-
-          {hasCheckOutWithoutCheckIn && (
-            <p className="outage-validation">Нельзя сохранить уход без прихода.</p>
-          )}
-          {missingRequiredRepair && (
-            <p className="outage-validation">{missingRequiredRepair}</p>
-          )}
-
-          <label className="outage-note">
-            Ответ администратора
-            <textarea
-              value={draft.review_note}
-              rows={3}
-              disabled={selected.status !== "pending"}
-              placeholder="Комментарий виден сотруднику"
-              onChange={(event) => setDraft((current) => ({ ...current, review_note: event.target.value }))}
+        <>
+          {reviewSheetOpen && (
+            <button
+              type="button"
+              className="explanation-review-backdrop"
+              aria-label="Закрыть заявку"
+              onClick={() => setReviewSheetOpen(false)}
             />
-          </label>
-
-          {selected.status === "pending" ? (
-            <div className="explanation-review-actions">
-              <button type="button" disabled={!canReject} onClick={() => setConfirmAction("reject")}>
-                Отклонить
-              </button>
-              <button type="button" disabled={!canApprove} onClick={() => setConfirmAction("approve")}>
-                Одобрить
-              </button>
-            </div>
-          ) : (
-            <p className="muted-text">
-              Рассмотрено {selected.reviewed_by_admin_email ? selected.reviewed_by_admin_email : "администратором"}
-              {selected.reviewed_at ? ` · ${formatDateTime(selected.reviewed_at)}` : ""}
-            </p>
           )}
-        </section>
+          <section className={`admin-panel explanation-review-panel ${reviewSheetOpen ? "explanation-review-panel-open" : ""}`}>
+            <button
+              type="button"
+              className="explanation-review-close"
+              aria-label="Закрыть заявку"
+              onClick={() => setReviewSheetOpen(false)}
+            >
+              <X size={20} />
+            </button>
+            <div className="admin-panel-header">
+              <div>
+                <span>Заявки сотрудника</span>
+                <h2>{selectedGroup?.fullName ?? selected.full_name}</h2>
+                <p>{selectedGroup?.email ?? selected.email}</p>
+              </div>
+              <ExplanationAdminStatus status={selected.status} />
+            </div>
+
+            {selectedGroup && (
+              <div className="outage-request-days-table">
+                <div>
+                  <span>Дата</span>
+                  <span>Тип</span>
+                  <span>Статус</span>
+                </div>
+                {selectedGroup.items.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={item.id === selected.id ? "outage-request-day-active" : ""}
+                    onClick={() => setSelectedId(item.id)}
+                  >
+                    <span>{formatDayShort(item.business_date)}</span>
+                    <span className={`explanation-type-chip explanation-type-${item.reason_type}`}>{reasonText(item.reason_type)}</span>
+                    <span className={`explanation-mini-status explanation-mini-status-${item.status}`}>{explanationStatusText(item.status)}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <div className="explanation-review-card">
+              <span>{formatDayLong(selected.business_date)} · {reasonText(selected.reason_type)}</span>
+              <p>{selected.comment}</p>
+            </div>
+
+            <div className="admin-day-card explanation-current-day">
+              <div>
+                <span>Приход сейчас</span>
+                <b>{selected.check_in_at ? formatOnlyTime(selected.check_in_at) : "Нет"}</b>
+              </div>
+              <div>
+                <span>Уход сейчас</span>
+                <b>{selected.check_out_at ? formatOnlyTime(selected.check_out_at) : "Нет"}</b>
+              </div>
+            </div>
+
+            {selectedIsVoidRequest ? (
+              <div className="explanation-void-admin-note">
+                <strong>При одобрении день будет аннулирован</strong>
+                <span>Исходные отметки останутся в базе, но день перестанет участвовать в статистике и проверке подозрительной активности.</span>
+              </div>
+            ) : (
+              <div className="outage-repair-row explanation-time-row">
+                <div>
+                  <strong>Корректировка времени</strong>
+                  <span>{repairHint}</span>
+                </div>
+                <label>
+                  Приход
+                  <TimePickerField
+                    value={checkInValue}
+                    disabled={!canEditCheckIn}
+                    placeholder="8:00"
+                    onOpen={() => setTimePicker({
+                      userId: selected.id,
+                      field: "check_in_at",
+                      businessDate: selected.business_date,
+                      value: checkInValue,
+                      defaultHour: "08",
+                      maxTime: selected.business_date === localISODate(new Date()) ? currentClockValue() : undefined,
+                    })}
+                  />
+                </label>
+                <label>
+                  Уход
+                  <TimePickerField
+                    value={checkOutValue}
+                    disabled={!canEditCheckOut}
+                    placeholder="17:00"
+                    onOpen={() => setTimePicker({
+                      userId: selected.id,
+                      field: "check_out_at",
+                      businessDate: selected.business_date,
+                      value: checkOutValue,
+                      defaultHour: "17",
+                      maxTime: selected.business_date === localISODate(new Date()) ? currentClockValue() : undefined,
+                    })}
+                  />
+                </label>
+              </div>
+            )}
+
+            {hasCheckOutWithoutCheckIn && (
+              <p className="outage-validation">Нельзя сохранить уход без прихода.</p>
+            )}
+            {missingRequiredRepair && (
+              <p className="outage-validation">{missingRequiredRepair}</p>
+            )}
+            {repairPolicyWarning && (
+              <p className="outage-validation">{repairPolicyWarning}</p>
+            )}
+
+            <label className="outage-note">
+              Ответ администратора
+              <textarea
+                value={draft.review_note}
+                rows={3}
+                disabled={selected.status !== "pending"}
+                placeholder="Необязательно. Комментарий виден сотруднику"
+                onChange={(event) => setDraft((current) => ({ ...current, review_note: event.target.value }))}
+              />
+            </label>
+
+            {selected.status === "pending" ? (
+              <div className="explanation-review-actions">
+                <button type="button" disabled={!canReject} onClick={() => setConfirmAction("reject")}>
+                  Отклонить
+                </button>
+                <button type="button" disabled={!canApprove} onClick={() => setConfirmAction("approve")}>
+                  {selectedIsVoidRequest ? "Аннулировать день" : "Одобрить"}
+                </button>
+              </div>
+            ) : (
+              <p className="muted-text">
+                Рассмотрено {selected.reviewed_by_admin_email ? selected.reviewed_by_admin_email : "администратором"}
+                {selected.reviewed_at ? ` · ${formatDateTime(selected.reviewed_at)}` : ""}
+              </p>
+            )}
+          </section>
+        </>
       )}
 
       <TimePickerDialog
@@ -1340,13 +1948,17 @@ function ExplanationsPanel({
       />
       <ConfirmDialog
         open={confirmAction !== null}
-        title={confirmAction === "approve" ? "Одобрить заявку?" : "Отклонить заявку?"}
+        title={confirmAction === "approve" ? (selectedIsVoidRequest ? "Аннулировать день?" : "Одобрить заявку?") : "Отклонить заявку?"}
         text={
           confirmAction === "approve"
-            ? "Если выбраны новые времена, они попадут в посещаемость и audit log."
-            : "Сотрудник увидит статус отклонения и комментарий администратора."
+            ? selectedIsVoidRequest
+              ? "День будет исключен из статистики. Исходные отметки останутся в базе, действие попадет в audit log."
+              : approvalConfirmText(selected, draft)
+            : draft.review_note.trim()
+              ? "Сотрудник увидит статус отклонения и комментарий администратора."
+              : "Сотрудник увидит статус отклонения без комментария администратора."
         }
-        confirmText={confirmAction === "approve" ? "Одобрить" : "Отклонить"}
+        confirmText={confirmAction === "approve" ? (selectedIsVoidRequest ? "Аннулировать" : "Одобрить") : "Отклонить"}
         tone={confirmAction === "reject" ? "danger" : "neutral"}
         onConfirm={() => {
           if (!confirmAction) return;
@@ -1357,7 +1969,11 @@ function ExplanationsPanel({
       <ConfirmDialog
         open={confirmRejectAllOpen}
         title="Отклонить все заявки?"
-        text={`Будут отклонены все заявки в текущем списке: ${pendingItems.length}. Сотрудники увидят общий комментарий администратора.`}
+        text={
+          bulkRejectNote.trim()
+            ? `Будут отклонены все заявки в текущем списке: ${pendingItems.length}. Сотрудники увидят общий комментарий администратора.`
+            : `Будут отклонены все заявки в текущем списке: ${pendingItems.length}. Комментарий сотрудникам не отправится.`
+        }
         confirmText="Отклонить все"
         tone="danger"
         onConfirm={() => void rejectAll()}
@@ -1369,6 +1985,227 @@ function ExplanationsPanel({
 
 function ExplanationAdminStatus({ status }: { status: AttendanceExplanationStatus }) {
   return <span className={`explanation-status explanation-status-${status}`}>{explanationStatusText(status)}</span>;
+}
+
+function AuditPanel({ month, onAuthLost }: { month: string; onAuthLost: () => void }) {
+  const [items, setItems] = useState<AdminAuditLog[]>([]);
+  const [sourceFilter, setSourceFilter] = useState<AdminAuditDecisionSource | "all">("all");
+  const [query, setQuery] = useState("");
+  const [selectedRollback, setSelectedRollback] = useState<AdminAuditLog | null>(null);
+  const [busyRollback, setBusyRollback] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadAuditLogs = useCallback(() => {
+    getAdminAuditLogs(month)
+      .then((data) => {
+        setItems(data.items);
+        setError(null);
+      })
+      .catch((err: unknown) => {
+        if (isAdminAuthError(err)) {
+          onAuthLost();
+          return;
+        }
+        setError(errorText(err));
+      });
+  }, [month, onAuthLost]);
+
+  useEffect(() => {
+    loadAuditLogs();
+  }, [loadAuditLogs]);
+
+  const rollbackReview = async () => {
+    if (!selectedRollback?.explanation_id) return;
+    setBusyRollback(true);
+    try {
+      await rollbackAdminExplanation(selectedRollback.explanation_id);
+      setSelectedRollback(null);
+      loadAuditLogs();
+    } catch (err: unknown) {
+      if (isAdminAuthError(err)) {
+        onAuthLost();
+        return;
+      }
+      setError(errorText(err));
+    } finally {
+      setBusyRollback(false);
+    }
+  };
+
+  const returnableAuditIds = useMemo(() => {
+    const lastRollbackAt = new Map<string, number>();
+    for (const item of items) {
+      if (item.explanation_id && item.action === "explanation_rollback") {
+        const createdAt = new Date(item.created_at).getTime();
+        const current = lastRollbackAt.get(item.explanation_id) ?? 0;
+        if (createdAt > current) {
+          lastRollbackAt.set(item.explanation_id, createdAt);
+        }
+      }
+    }
+
+    const explanationWithActiveDecision = new Set<string>();
+    for (const item of items) {
+      if (
+        !item.explanation_id ||
+        !["explanation_approved", "explanation_rejected"].includes(item.action)
+      ) {
+        continue;
+      }
+
+      if (new Date(item.created_at).getTime() > (lastRollbackAt.get(item.explanation_id) ?? 0)) {
+        explanationWithActiveDecision.add(item.explanation_id);
+      }
+    }
+
+    const result = new Set<string>();
+    for (const item of items) {
+      if (
+        item.explanation_id &&
+        explanationWithActiveDecision.has(item.explanation_id) &&
+        new Date(item.created_at).getTime() > (lastRollbackAt.get(item.explanation_id) ?? 0) &&
+        ["explanation_approved", "explanation_rejected", "check_in_changed", "check_out_changed", "day_voided"].includes(item.action)
+      ) {
+        result.add(item.id);
+      }
+    }
+
+    return result;
+  }, [items]);
+
+  const canReturnToReview = (item: AdminAuditLog) => Boolean(
+    item.explanation_id &&
+    returnableAuditIds.has(item.id) &&
+    ["explanation_approved", "explanation_rejected", "check_in_changed", "check_out_changed", "day_voided"].includes(item.action),
+  );
+
+  const visibleItems = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    return items.filter((item) => {
+      if (sourceFilter !== "all" && item.decision_source !== sourceFilter) {
+        return false;
+      }
+      if (!normalizedQuery) {
+        return true;
+      }
+      return auditSearchText(item).includes(normalizedQuery);
+    });
+  }, [items, query, sourceFilter]);
+
+  return (
+    <section className="admin-panel audit-panel">
+      <div className="admin-panel-header">
+        <div>
+          <span>Журнал действий</span>
+          <h2>Аудит администраторов</h2>
+          <p>Показываются действия за выбранный месяц.</p>
+        </div>
+        <strong className="admin-count-badge">{items.length}</strong>
+      </div>
+
+      <div className="audit-filters">
+        {([
+          { value: "all", label: "Все", count: items.length },
+          {
+            value: "employee_request",
+            label: "По заявке сотрудника",
+            count: items.filter((item) => item.decision_source === "employee_request").length,
+          },
+          {
+            value: "admin_decision",
+            label: "По решению администрации",
+            count: items.filter((item) => item.decision_source === "admin_decision").length,
+          },
+        ] as const).map((filter) => (
+          <button
+            key={filter.value}
+            type="button"
+            className={sourceFilter === filter.value ? "audit-filter-active" : ""}
+            onClick={() => setSourceFilter(filter.value)}
+          >
+            {filter.label}
+            <span>{filter.count}</span>
+          </button>
+        ))}
+      </div>
+
+      <label className="admin-search audit-search">
+        <Search size={16} />
+        <input
+          value={query}
+          placeholder="Поиск по администратору, сотруднику, дате или действию"
+          onChange={(event) => setQuery(event.target.value)}
+        />
+      </label>
+      <p className="audit-result-count">
+        Найдено: {visibleItems.length} из {items.length}
+      </p>
+
+      {error && <p className="error-banner">{error}</p>}
+
+      {visibleItems.length === 0 ? (
+        <p className="muted-text">Действий за выбранный период нет</p>
+      ) : (
+        <div className="audit-list">
+          {visibleItems.map((item) => (
+            <article key={item.id} className={`audit-row audit-row-${item.action}`}>
+              <div className={`audit-icon audit-icon-${item.action}`}>
+                <ClipboardList size={18} />
+              </div>
+              <div>
+                <strong className={`audit-action-chip audit-action-${item.action}`}>{auditActionText(item.action)}</strong>
+                <small className={`audit-source audit-source-${item.decision_source}`}>
+                  {auditDecisionSourceText(item.decision_source)}
+                </small>
+                <span>
+                  {item.full_name ?? item.email ?? "Сотрудник не найден"}
+                  {item.business_date ? ` · ${formatDayShort(item.business_date)}` : ""}
+                </span>
+                <p>{auditReasonText(item.reason)}</p>
+                <em>{item.admin_email} · {formatDateTime(item.created_at)}</em>
+                {canReturnToReview(item) && (
+                  <button
+                    type="button"
+                    className="audit-rollback-button"
+                    onClick={() => setSelectedRollback(item)}
+                  >
+                    Вернуть на рассмотрение
+                  </button>
+                )}
+              </div>
+              <AuditTimes item={item} />
+            </article>
+          ))}
+        </div>
+      )}
+      <ConfirmDialog
+        open={selectedRollback !== null}
+        title="Вернуть заявку на рассмотрение?"
+        text="Решение администратора будет отменено. Если при одобрении менялись приход, уход или день был аннулирован, данные вернутся к состоянию до решения. Действие попадет в audit log."
+        confirmText={busyRollback ? "Возвращаем..." : "Вернуть на рассмотрение"}
+        tone="danger"
+        onConfirm={() => void rollbackReview()}
+        onCancel={() => {
+          if (!busyRollback) setSelectedRollback(null);
+        }}
+      />
+    </section>
+  );
+}
+
+function AuditTimes({ item }: { item: AdminAuditLog }) {
+  const oldTimes = [item.old_check_in_at, item.old_check_out_at].filter(Boolean).map((value) => formatOnlyTime(value as string));
+  const newTimes = [item.new_check_in_at, item.new_check_out_at].filter(Boolean).map((value) => formatOnlyTime(value as string));
+  if (oldTimes.length === 0 && newTimes.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="audit-times">
+      {oldTimes.length > 0 && <span>Было: {oldTimes.join(" - ")}</span>}
+      {newTimes.length > 0 && <span>Стало: {newTimes.join(" - ")}</span>}
+    </div>
+  );
 }
 
 function AccessManagement({ onAuthLost }: { onAuthLost: () => void }) {
@@ -1866,7 +2703,19 @@ function explanationMissingRequiredRepair(
   checkInValue: string,
   checkOutValue: string,
 ): string | null {
+  if (explanation.reason_type === "void_day_request") {
+    return null;
+  }
+
   switch (explanation.reason_type) {
+    case "late":
+      return normalizeTimeInput(toTimeDisplayValue(explanation.check_in_at)) === normalizeTimeInput(checkInValue)
+        ? `Для заявки по опозданию выберите новое время прихода не раньше ${formatPolicyTime(DEFAULT_WORKDAY_START)}.`
+        : null;
+    case "early_leave":
+      return normalizeTimeInput(toTimeDisplayValue(explanation.check_out_at)) === normalizeTimeInput(checkOutValue)
+        ? `Для заявки по раннему уходу выберите новое время ухода не позже ${formatPolicyTime(DEFAULT_WORKDAY_END)}.`
+        : null;
     case "missing_day":
       if (!checkInValue && !checkOutValue) return "Для полностью пустого дня выберите приход и уход.";
       if (!checkInValue) return "Для полностью пустого дня выберите приход.";
@@ -1879,6 +2728,94 @@ function explanationMissingRequiredRepair(
     default:
       return null;
   }
+}
+
+function explanationRepairHint(explanation: AdminExplanation): string {
+  switch (explanation.reason_type) {
+    case "late":
+      return `Выберите только новое время прихода: не раньше ${formatPolicyTime(DEFAULT_WORKDAY_START)} и не то же самое, что уже записано. Уход по этой заявке не меняется.`;
+    case "early_leave":
+      return `Выберите только новое время ухода: не позже ${formatPolicyTime(DEFAULT_WORKDAY_END)} и не то же самое, что уже записано. Приход по этой заявке не меняется.`;
+    case "missing_check_in":
+      return "Выберите только время прихода, которое нужно добавить в посещаемость.";
+    case "missing_check_out":
+      return "Выберите только время ухода, которое нужно добавить в посещаемость.";
+    case "missing_day":
+      return "Выберите приход и уход, которые нужно добавить в посещаемость.";
+    case "void_day_request":
+      return "";
+  }
+}
+
+function explanationCanRepairCheckIn(reasonType: AdminExplanation["reason_type"]): boolean {
+  return ["late", "missing_check_in", "missing_day"].includes(reasonType);
+}
+
+function explanationCanRepairCheckOut(reasonType: AdminExplanation["reason_type"]): boolean {
+  return ["early_leave", "missing_check_out", "missing_day"].includes(reasonType);
+}
+
+function explanationDecisionPayload(
+  explanation: AdminExplanation,
+  draft: { check_in_at: string; check_out_at: string; review_note: string },
+): AdminExplanationDecision {
+  return {
+    review_note: draft.review_note.trim() || undefined,
+    check_in_at: explanationCanRepairCheckIn(explanation.reason_type) ? normalizeTimeInput(draft.check_in_at) : undefined,
+    check_out_at: explanationCanRepairCheckOut(explanation.reason_type) ? normalizeTimeInput(draft.check_out_at) : undefined,
+  };
+}
+
+function explanationRepairPolicyWarning(
+  explanation: AdminExplanation,
+  draftCheckIn: string,
+  draftCheckOut: string,
+): string | null {
+  const checkIn = normalizeTimeInput(draftCheckIn);
+  const checkOut = normalizeTimeInput(draftCheckOut);
+
+  if (explanation.reason_type === "late" && checkIn && compareClock(checkIn, DEFAULT_WORKDAY_START) < 0) {
+    return `Для заявки по опозданию новое время прихода не может быть раньше ${formatPolicyTime(DEFAULT_WORKDAY_START)}.`;
+  }
+  if (explanation.reason_type === "early_leave" && checkOut && compareClock(checkOut, DEFAULT_WORKDAY_END) > 0) {
+    return `Для заявки по раннему уходу новое время ухода не может быть позже ${formatPolicyTime(DEFAULT_WORKDAY_END)}.`;
+  }
+
+  return null;
+}
+
+function approvalConfirmText(explanation: AdminExplanation | null, draft: { check_in_at: string; check_out_at: string }): string {
+  if (!explanation) {
+    return "Заявка будет одобрена.";
+  }
+
+  const changes: string[] = [];
+  const checkIn = normalizeTimeInput(draft.check_in_at);
+  const checkOut = normalizeTimeInput(draft.check_out_at);
+  if (checkIn) changes.push(`приход: ${formatPolicyTime(checkIn)}`);
+  if (checkOut) changes.push(`уход: ${formatPolicyTime(checkOut)}`);
+
+  if (changes.length === 0) {
+    return "Время посещения не изменится. Будет одобрен только статус заявки сотрудника, действие попадет в audit log.";
+  }
+
+  return `Будет записано новое время: ${changes.join(", ")}. Изменение попадет в посещаемость и audit log.`;
+}
+
+function compareClock(left: string, right: string): number {
+  return clockMinutes(left) - clockMinutes(right);
+}
+
+function clockMinutes(value: string): number {
+  const parsed = parseTimeValue(value);
+  if (!parsed) return 0;
+  return Number(parsed.hour) * 60 + Number(parsed.minute);
+}
+
+function formatPolicyTime(value: string): string {
+  const parsed = parseTimeValue(value);
+  if (!parsed) return value;
+  return `${Number(parsed.hour)}:${parsed.minute}`;
 }
 
 function isClockAfter(
@@ -1899,41 +2836,6 @@ function currentClockValue(): string {
 
 function localISODate(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
-
-function buildOutageRepairItems(
-  draft: Record<string, { check_in_at: string; check_out_at: string }>,
-  employees: Array<{ user_id: string; check_in_at: string | null }>,
-): {
-  items: AdminOutageRepairItem[];
-  hasInvalid: boolean;
-  hasCheckOutWithoutCheckIn: boolean;
-} {
-  const items: AdminOutageRepairItem[] = [];
-  const existingCheckIns = new Map(employees.map((employee) => [employee.user_id, Boolean(employee.check_in_at)]));
-  let hasInvalid = false;
-  let hasCheckOutWithoutCheckIn = false;
-
-  for (const [userId, value] of Object.entries(draft)) {
-    const checkIn = normalizeTimeInput(value.check_in_at);
-    const checkOut = normalizeTimeInput(value.check_out_at);
-    if ((value.check_in_at && !checkIn) || (value.check_out_at && !checkOut)) {
-      hasInvalid = true;
-      continue;
-    }
-    if (checkOut && !checkIn && !existingCheckIns.get(userId)) {
-      hasCheckOutWithoutCheckIn = true;
-    }
-    if (checkIn || checkOut) {
-      items.push({
-        user_id: userId,
-        check_in_at: checkIn,
-        check_out_at: checkOut,
-      });
-    }
-  }
-
-  return { items, hasInvalid, hasCheckOutWithoutCheckIn };
 }
 
 function formatDateTime(value: string): string {
@@ -1965,6 +2867,75 @@ function eventTypeText(value: "check_in" | "check_out"): string {
   return value === "check_in" ? "приход" : "уход";
 }
 
+function explanationStats(items: AdminExplanation[]): Record<AttendanceExplanationStatus, number> {
+  return {
+    pending: items.filter((item) => item.status === "pending").length,
+    approved: items.filter((item) => item.status === "approved").length,
+    rejected: items.filter((item) => item.status === "rejected").length,
+  };
+}
+
+function requestCountLabel(count: number): string {
+  const lastTwo = count % 100;
+  const last = count % 10;
+  if (lastTwo >= 11 && lastTwo <= 14) return "заявок";
+  if (last === 1) return "заявка";
+  if (last >= 2 && last <= 4) return "заявки";
+  return "заявок";
+}
+
+function groupExplanationsByUser(items: AdminExplanation[]): Array<{
+  userId: string;
+  fullName: string;
+  email: string;
+  items: AdminExplanation[];
+}> {
+  const groups = new Map<string, {
+    userId: string;
+    fullName: string;
+    email: string;
+    items: AdminExplanation[];
+  }>();
+
+  for (const item of items) {
+    const group = groups.get(item.user_id) ?? {
+      userId: item.user_id,
+      fullName: item.full_name,
+      email: item.email,
+      items: [],
+    };
+    group.items.push(item);
+    groups.set(item.user_id, group);
+  }
+
+  return [...groups.values()].map((group) => ({
+    ...group,
+    items: group.items.sort((left, right) => left.business_date.localeCompare(right.business_date)),
+  }));
+}
+
+function outageAffectedDates(outage: AdminSystemOutage): string[] {
+  const result = new Set<string>();
+  if (outage.affected_business_date) {
+    result.add(outage.affected_business_date);
+  }
+
+  const start = new Date(outage.started_at);
+  const end = new Date(outage.ended_at);
+  const cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+  const last = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+
+  while (cursor <= last) {
+    const weekday = cursor.getDay();
+    if (weekday !== 0 && weekday !== 6) {
+      result.add(localISODate(cursor));
+    }
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return [...result].sort();
+}
+
 function reasonText(value: AdminExplanation["reason_type"]): string {
   switch (value) {
     case "late":
@@ -1977,6 +2948,8 @@ function reasonText(value: AdminExplanation["reason_type"]): string {
       return "Нет ухода";
     case "missing_day":
       return "Нет отметок";
+    case "void_day_request":
+      return "Исключить день";
   }
 }
 
@@ -1991,7 +2964,75 @@ function explanationStatusText(value: AttendanceExplanationStatus): string {
   }
 }
 
+function auditActionText(value: AdminAuditLog["action"]): string {
+  switch (value) {
+    case "day_voided":
+      return "День аннулирован";
+    case "day_restored":
+      return "День восстановлен";
+    case "check_in_changed":
+      return "Приход изменен";
+    case "check_out_changed":
+      return "Уход изменен";
+    case "explanation_approved":
+      return "Заявка одобрена";
+    case "explanation_rejected":
+      return "Заявка отклонена";
+    case "explanation_rollback":
+      return "Решение по заявке отменено";
+    case "system_outage_resolved":
+      return "Сбой сервера проверен";
+  }
+}
+
+function auditReasonText(value: string): string {
+  switch (value) {
+    case "employee_explanation_approved":
+      return "Исправлено по одобренной заявке сотрудника";
+    case "employee_explanation_rejected":
+      return "Заявка сотрудника отклонена";
+    case "employee_explanation_rollback":
+      return "Заявка возвращена на рассмотрение";
+    case "system_outage_repair":
+      return "Восстановлено после сбоя сервера";
+    case "system_outage_resolved":
+      return "Сбой сервера проверен администратором";
+    default:
+      return value;
+  }
+}
+
+function auditDecisionSourceText(value: AdminAuditDecisionSource): string {
+  switch (value) {
+    case "employee_request":
+      return "По заявке сотрудника";
+    case "admin_decision":
+      return "По решению администрации";
+  }
+}
+
+function auditSearchText(item: AdminAuditLog): string {
+  return [
+    item.admin_email,
+    item.email,
+    item.full_name,
+    item.business_date,
+    item.created_at,
+    auditActionText(item.action),
+    auditReasonText(item.reason),
+    auditDecisionSourceText(item.decision_source),
+    item.old_check_in_at ? formatOnlyTime(item.old_check_in_at) : "",
+    item.old_check_out_at ? formatOnlyTime(item.old_check_out_at) : "",
+    item.new_check_in_at ? formatOnlyTime(item.new_check_in_at) : "",
+    item.new_check_out_at ? formatOnlyTime(item.new_check_out_at) : "",
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
 function dayDotClass(day: AttendanceDaySummary): string {
+  if (day.voided) return "calendar-dot-muted";
   if (day.impacted_by_outage) return "calendar-dot-outage";
   if (day.explanations.some((item) => item.status === "pending")) return "calendar-dot-outage";
   if (isTodayInProgress(day)) return "calendar-dot-live";

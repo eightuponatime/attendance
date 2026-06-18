@@ -144,7 +144,7 @@ export function CalendarScreen() {
             />
           </section>
 
-          <CalendarDayCard day={selectedDay} onSubmitted={loadSummary} />
+          <CalendarDayCard day={selectedDay} days={summary?.days ?? [selectedDay]} onSubmitted={loadSummary} />
         </>
       ) : (
         <YearSwitcher
@@ -198,7 +198,7 @@ function MonthGrid({
             onClick={() => onSelectDate(date)}
           >
             <span>{cell.date.getDate()}</span>
-            {day && (day.status !== "empty" || day.impacted_by_outage) && <i className={dayDotClass(day)} />}
+            {day && (day.status !== "empty" || day.impacted_by_outage || day.voided) && <i className={dayDotClass(day)} />}
           </button>
         );
       })}
@@ -272,7 +272,15 @@ function MiniMonth({
   );
 }
 
-function CalendarDayCard({ day, onSubmitted }: { day: AttendanceDaySummary; onSubmitted: () => void }) {
+function CalendarDayCard({
+  day,
+  days,
+  onSubmitted,
+}: {
+  day: AttendanceDaySummary;
+  days: AttendanceDaySummary[];
+  onSubmitted: () => void;
+}) {
   const { formatDateString, locale, t } = useI18n();
   return (
     <section className="stats-card selected-day-card">
@@ -284,6 +292,12 @@ function CalendarDayCard({ day, onSubmitted }: { day: AttendanceDaySummary; onSu
         <div className="outage-warning outage-warning-compact">
           <strong>{t("outage.warningTitle")}</strong>
           <span>{t("outage.warningText")}</span>
+        </div>
+      )}
+      {day.voided && (
+        <div className="selected-day-void-note">
+          <strong>День аннулирован администратором</strong>
+          {day.void_reason && <span>{day.void_reason}</span>}
         </div>
       )}
 
@@ -303,7 +317,7 @@ function CalendarDayCard({ day, onSubmitted }: { day: AttendanceDaySummary; onSu
           value={day.worked_minutes > 0 ? minutesToClock(day.worked_minutes) : "0:00"}
         />
       </div>
-      <AttendanceExplanationBox day={day} onSubmitted={onSubmitted} />
+      {!day.voided && <AttendanceExplanationBox day={day} days={days} onSubmitted={onSubmitted} />}
     </section>
   );
 }
@@ -372,6 +386,10 @@ function emptyDay(date: string): AttendanceDaySummary {
     early_leave_minutes: 0,
     status: "empty",
     impacted_by_outage: false,
+    voided: false,
+    void_reason: null,
+    voided_by_admin: null,
+    voided_at: null,
     explanations: [],
   };
 }
@@ -408,6 +426,7 @@ function minutesToClock(minutes: number): string {
 }
 
 function statusText(day: AttendanceDaySummary, t: ReturnType<typeof useI18n>["t"]): string {
+  if (day.voided) return "Аннулировано";
   if (day.status === "empty") return t("status.empty");
   if (day.status === "in_progress") return t("status.inProgress");
   return t("status.complete");
@@ -415,6 +434,7 @@ function statusText(day: AttendanceDaySummary, t: ReturnType<typeof useI18n>["t"
 
 
 function dayDotClass(day: AttendanceDaySummary): string {
+  if (day.voided) return "calendar-dot-muted";
   if (day.impacted_by_outage) return "calendar-dot-outage";
   if (day.explanations.some((item) => item.status === "pending")) return "calendar-dot-outage";
   if (isTodayInProgress(day)) return "calendar-dot-live";
