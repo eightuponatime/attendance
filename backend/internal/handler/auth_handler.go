@@ -360,7 +360,7 @@ func (h *AuthHandler) writeAuthError(w http.ResponseWriter, err error) {
 	case errors.Is(err, impl.ErrLoginAccountNotFound):
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Аккаунт с таким email не найден"})
 	case errors.Is(err, impl.ErrLoginPasswordMissing):
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "У этого аккаунта нет пароля. Войдите через Google"})
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Этот email зарегистрирован через Google. Нажмите «Войти через Google» ниже."})
 	case errors.Is(err, impl.ErrLoginPasswordMismatch):
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Неверный пароль"})
 	case errors.Is(err, impl.ErrInvalidCredentials):

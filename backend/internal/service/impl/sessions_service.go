@@ -35,10 +35,6 @@ func (s *SessionsService) Create(ctx context.Context, userId uuid.UUID) (*domain
 		return nil, fmt.Errorf("%w: user_id is empty", ErrInvalidSession)
 	}
 
-	if err := s.rp.RevokeActiveByUserID(ctx, userId); err != nil {
-		return nil, err
-	}
-
 	expiresAt := time.Now().UTC().Add(s.cfg.SessionTTL)
 	return s.rp.Create(ctx, domain.CreateSessionInput{
 		UserId:    userId,

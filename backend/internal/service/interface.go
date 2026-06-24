@@ -29,6 +29,7 @@ type AttendanceService interface {
 	CheckOut(ctx context.Context, input domain.AttendanceMarkInput) (*domain.AttendanceToday, error)
 	Summary(ctx context.Context, userId uuid.UUID, from time.Time, to time.Time) (*domain.AttendanceSummary, error)
 	SubmitExplanation(ctx context.Context, input domain.CreateAttendanceExplanationInput) (*domain.AttendanceExplanation, error)
+	CancelExplanation(ctx context.Context, userId uuid.UUID, explanationId uuid.UUID) (*domain.AttendanceExplanation, error)
 }
 
 type SystemService interface {

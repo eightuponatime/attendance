@@ -27,8 +27,8 @@ export function CalendarScreen() {
         setSummary(data);
         setError(null);
       })
-      .catch((err: unknown) => setError(errorText(err)));
-  }, [range.from, range.to]);
+      .catch((err: unknown) => setError(errorText(err, t)));
+  }, [range.from, range.to, t]);
 
   useEffect(() => {
     loadSummary();

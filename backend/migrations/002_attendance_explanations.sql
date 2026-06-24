@@ -8,12 +8,13 @@ create table attendance_explanations (
             'early_leave',
             'missing_check_in',
             'missing_check_out',
-            'missing_day'
+            'missing_day',
+            'void_day_request'
         )
     ),
     comment text not null,
     status text not null default 'pending' check (
-        status in ('pending', 'approved', 'rejected')
+        status in ('pending', 'approved', 'rejected', 'cancelled')
     ),
     reviewed_by_admin_email text,
     reviewed_at timestamptz,

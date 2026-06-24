@@ -1722,6 +1722,7 @@ function ExplanationsPanel({
             ["pending", "На рассмотрении"],
             ["approved", "Одобрено"],
             ["rejected", "Отклонено"],
+            ["cancelled", "Отменено"],
             ["all", "Все"],
           ] as Array<[AttendanceExplanationStatus | "all", string]>).map(([value, label]) => (
             <button
@@ -2872,6 +2873,7 @@ function explanationStats(items: AdminExplanation[]): Record<AttendanceExplanati
     pending: items.filter((item) => item.status === "pending").length,
     approved: items.filter((item) => item.status === "approved").length,
     rejected: items.filter((item) => item.status === "rejected").length,
+    cancelled: items.filter((item) => item.status === "cancelled").length,
   };
 }
 
@@ -2961,6 +2963,8 @@ function explanationStatusText(value: AttendanceExplanationStatus): string {
       return "Одобрено";
     case "rejected":
       return "Отклонено";
+    case "cancelled":
+      return "Отменено";
   }
 }
 

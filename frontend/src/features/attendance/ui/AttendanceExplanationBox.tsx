@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { submitAttendanceExplanations } from "../api/attendanceApi";
+import { cancelAttendanceExplanation, submitAttendanceExplanations } from "../api/attendanceApi";
 import { errorText } from "../../../shared/api/errors";
 import { useI18n } from "../../../shared/i18n/i18n";
 import type {
@@ -18,8 +18,11 @@ export function AttendanceExplanationBox({
   onSubmitted: () => void;
 }) {
   const { t } = useI18n();
-  const existingByReason = new Map(day.explanations.map((item) => [item.reason_type, item]));
+  const visibleExplanations = day.explanations.filter((item) => item.status !== "cancelled");
+  const blockingExplanations = day.explanations.filter((item) => item.status !== "cancelled");
+  const existingByReason = new Map(blockingExplanations.map((item) => [item.reason_type, item]));
   const availableReasons = explanationReasons(day, t).filter((reason) => !existingByReason.has(reason.value));
+  const availableReasonKey = availableReasons.map((reason) => reason.value).join("|");
   const firstReason = availableReasons[0]?.value ?? "late";
   const outageMissingDates = outageMissingExplanationDates(days);
   const [reasonType, setReasonType] = useState<AttendanceExplanationReason>(firstReason);
@@ -27,6 +30,7 @@ export function AttendanceExplanationBox({
   const [comment, setComment] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
   const isGroupedOutageReason = reasonType === "missing_day" && isEmptyOutageDay(day) && outageMissingDates.length > 1;
   const isVoidDayReason = reasonType === "void_day_request";
   const submitDates = isGroupedOutageReason ? selectedDates : [day.date];
@@ -37,7 +41,7 @@ export function AttendanceExplanationBox({
     setSelectedDates([day.date]);
     setComment("");
     setError(null);
-  }, [day.date, day.explanations.length]);
+  }, [day.date, availableReasonKey]);
 
   const submit = async () => {
     if (!comment.trim() || availableReasons.length === 0 || submitDates.length === 0) return;
@@ -52,7 +56,7 @@ export function AttendanceExplanationBox({
       setError(null);
       onSubmitted();
     } catch (err: unknown) {
-      setError(errorText(err));
+      setError(errorText(err, t));
     } finally {
       setSaving(false);
     }
@@ -68,7 +72,20 @@ export function AttendanceExplanationBox({
     });
   };
 
-  if (availableReasons.length === 0 && day.explanations.length === 0) {
+  const cancel = async (id: string) => {
+    setCancellingId(id);
+    try {
+      await cancelAttendanceExplanation(id);
+      setError(null);
+      onSubmitted();
+    } catch (err: unknown) {
+      setError(errorText(err, t));
+    } finally {
+      setCancellingId(null);
+    }
+  };
+
+  if (availableReasons.length === 0 && visibleExplanations.length === 0) {
     return null;
   }
 
@@ -81,9 +98,9 @@ export function AttendanceExplanationBox({
         </div>
       </div>
 
-      {day.explanations.length > 0 && (
+      {visibleExplanations.length > 0 && (
         <div className="explanation-history">
-          {day.explanations.map((item) => (
+          {visibleExplanations.map((item) => (
             <div key={item.id} className="explanation-history-row">
               <div>
                 <strong>{reasonText(item.reason_type, t)}</strong>
@@ -95,7 +112,14 @@ export function AttendanceExplanationBox({
                   </div>
                 )}
               </div>
-              <ExplanationStatus explanation={item} t={t} />
+              <div className="explanation-history-actions">
+                <ExplanationStatus explanation={item} t={t} />
+                {item.status === "pending" && (
+                  <button type="button" disabled={cancellingId === item.id} onClick={() => void cancel(item.id)}>
+                    {cancellingId === item.id ? t("explanation.cancelling") : t("explanation.cancel")}
+                  </button>
+                )}
+              </div>
             </div>
           ))}
         </div>
@@ -164,7 +188,7 @@ function outageMissingExplanationDates(days: AttendanceDaySummary[]): string[] {
       isEmptyOutageDay(item) &&
       canExplainClosedDay(item.date) &&
       !isWeekend(item.date) &&
-      !item.explanations.some((explanation) => explanation.reason_type === "missing_day")
+      !item.explanations.some((explanation) => explanation.reason_type === "missing_day" && explanation.status !== "cancelled")
     ))
     .map((item) => item.date)
     .sort();
@@ -266,6 +290,8 @@ function explanationStatusText(
       return t("explanation.status.approved");
     case "rejected":
       return t("explanation.status.rejected");
+    case "cancelled":
+      return t("explanation.status.cancelled");
   }
 }
 

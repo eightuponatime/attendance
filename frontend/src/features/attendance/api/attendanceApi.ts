@@ -71,6 +71,19 @@ export async function submitAttendanceExplanations(payloads: Array<{
   return Promise.all(payloads.map((payload) => submitAttendanceExplanation(payload)));
 }
 
+export async function cancelAttendanceExplanation(id: string): Promise<AttendanceExplanation> {
+  const response = await fetch(`/api/attendance/explanations/${id}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response));
+  }
+
+  return response.json() as Promise<AttendanceExplanation>;
+}
+
 async function markAttendance(
   url: string,
   payload: AttendanceMarkPayload,

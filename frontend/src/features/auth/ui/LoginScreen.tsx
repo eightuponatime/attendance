@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import { Clock3, Eye, EyeOff } from "lucide-react";
 import { login, register } from "../api/authApi";
+import { errorText, translateErrorMessage } from "../../../shared/api/errors";
 import { useI18n } from "../../../shared/i18n/i18n";
 import { LanguageSwitcher } from "../../../shared/ui/LanguageSwitcher";
 
@@ -35,6 +36,7 @@ export function LoginScreen({
   const [googleRegistrationActive, setGoogleRegistrationActive] = useState(initialGoogleRegistration);
   const googleRegistration = mode === "register" && googleRegistrationActive && email !== "";
   const noticeText = notice === "google_registration" ? t("auth.googleRegistrationNotice") : notice;
+  const screenError = translateErrorMessage(formError || error, t);
   const loginPath = admin ? "/auth/admin/google/login" : "/auth/google/login";
   const loginURL = `${loginPath}?${new URLSearchParams({
     return_to: `${window.location.pathname}${window.location.search}`,
@@ -64,7 +66,7 @@ export function LoginScreen({
       }
       onAuthenticated?.();
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : t("auth.formError"));
+      setFormError(errorText(err, t) ?? t("auth.formError"));
     } finally {
       setSubmitting(false);
     }
@@ -97,7 +99,7 @@ export function LoginScreen({
         <Clock3 size={52} strokeWidth={2.2} />
         <h2>{t("auth.title")}</h2>
         <p>{t("auth.adminText")}</p>
-        {error && <p className="error-banner">{error}</p>}
+        {screenError && <p className="error-banner">{screenError}</p>}
         <a className="google-login-link" href={loginURL}>
           <GoogleLogo />
           {t("auth.adminLogin")}
@@ -115,7 +117,7 @@ export function LoginScreen({
       <h2>{t("auth.title")}</h2>
       <p>{googleRegistration ? t("auth.googleRegistrationText") : mode === "login" ? t("auth.loginText") : t("auth.registerText")}</p>
       {noticeText && googleRegistration && <p className="auth-notice">{noticeText}</p>}
-      {(error || formError) && <p className="error-banner">{formError || error}</p>}
+      {screenError && <p className="error-banner">{screenError}</p>}
 
       <form className="auth-form" onSubmit={handleSubmit}>
         {googleRegistration && (
@@ -213,7 +215,7 @@ export function LoginScreen({
           </button>
           <a className="google-login-link" href={loginURL}>
             <GoogleLogo />
-            {t("auth.login")}
+            {mode === "login" ? t("auth.login") : t("auth.registerWithGoogle")}
           </a>
         </>
       )}

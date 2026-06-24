@@ -338,7 +338,7 @@ func (s *AdminService) ListExplanations(
 	status string,
 ) ([]domain.AdminExplanationRow, error) {
 	status = strings.TrimSpace(status)
-	if status != "" && status != "pending" && status != "approved" && status != "rejected" {
+	if status != "" && status != "pending" && status != "approved" && status != "rejected" && status != "cancelled" {
 		return nil, fmt.Errorf("%w: status is invalid", ErrInvalidAdminInput)
 	}
 

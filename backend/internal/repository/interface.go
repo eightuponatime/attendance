@@ -35,6 +35,7 @@ type AttendanceRepository interface {
 	CreateEvent(ctx context.Context, input domain.CreateAttendanceEventInput) (*domain.AttendanceEvents, error)
 	GetRangeEventRows(ctx context.Context, userId uuid.UUID, from time.Time, to time.Time) ([]domain.AttendanceRangeEventRow, error)
 	UpsertExplanation(ctx context.Context, input domain.CreateAttendanceExplanationInput) (*domain.AttendanceExplanation, error)
+	CancelPendingExplanation(ctx context.Context, userId uuid.UUID, explanationId uuid.UUID) (*domain.AttendanceExplanation, error)
 	ListExplanationsByUserRange(ctx context.Context, userId uuid.UUID, from time.Time, to time.Time) ([]domain.AttendanceExplanation, error)
 }
 

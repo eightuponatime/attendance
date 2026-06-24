@@ -8,7 +8,7 @@ import { StatsScreen } from "../features/attendance/ui/StatsScreen";
 import { getMe, logout } from "../features/auth/api/authApi";
 import { LoginScreen } from "../features/auth/ui/LoginScreen";
 import { ProfileScreen } from "../features/profile/ui/ProfileScreen";
-import { errorText } from "../shared/api/errors";
+import { errorText, translateErrorMessage } from "../shared/api/errors";
 import { browserName, getDeviceId, phoneModel } from "../shared/device/device";
 import { buildScreenDate } from "../shared/lib/date";
 import { BUSINESS_TIME_ZONE } from "../shared/config/businessTime";
@@ -60,7 +60,7 @@ function AppContent() {
       } catch {
         setAdmin(null);
         setAdminState("denied");
-        setError(authError);
+        setError(translateErrorMessage(authError, t));
         setLoadState("guest");
       }
       return;
@@ -71,7 +71,7 @@ function AppContent() {
 
     if (!me) {
       setToday(null);
-      setError(authError);
+      setError(translateErrorMessage(authError, t));
       setLoadState("guest");
       return;
     }
@@ -80,11 +80,11 @@ function AppContent() {
     setToday(attendance);
 
     setLoadState("ready");
-  }, [authError, isAdminRoute]);
+  }, [authError, isAdminRoute, t]);
 
   useEffect(() => {
     refresh().catch((err: unknown) => {
-      setError(errorText(err));
+      setError(errorText(err, t));
       setLoadState("guest");
     });
   }, [refresh]);
@@ -95,7 +95,7 @@ function AppContent() {
         return;
       }
       if (document.visibilityState === "visible") {
-        refresh().catch((err: unknown) => setError(errorText(err)));
+        refresh().catch((err: unknown) => setError(errorText(err, t)));
       }
     };
 
@@ -106,7 +106,7 @@ function AppContent() {
       document.removeEventListener("visibilitychange", syncOnVisible);
       window.removeEventListener("focus", syncOnVisible);
     };
-  }, [isAdminRoute, refresh]);
+  }, [isAdminRoute, refresh, t]);
 
   const now = useNow();
   const screenDate = useMemo(() => buildScreenDate(now, formatDate, BUSINESS_TIME_ZONE), [formatDate, now]);
@@ -125,7 +125,7 @@ function AppContent() {
       const nextToday = type === "check_in" ? await checkIn(payload) : await checkOut(payload);
       setToday(nextToday);
     } catch (err: unknown) {
-      setError(errorText(err));
+      setError(errorText(err, t));
     } finally {
       setIsMarking(false);
     }
@@ -140,7 +140,7 @@ function AppContent() {
       setLoadState("guest");
       setTab("home");
     } catch (err: unknown) {
-      setError(errorText(err));
+      setError(errorText(err, t));
     }
   };
 
@@ -153,7 +153,7 @@ function AppContent() {
         handleAdminAuthLost();
         return;
       }
-      setError(errorText(err));
+      setError(errorText(err, t));
       return;
     }
 

@@ -32,7 +32,7 @@ export type AttendanceMarkPayload = {
 };
 
 export type AttendanceDayStatus = "empty" | "in_progress" | "complete";
-export type AttendanceExplanationStatus = "pending" | "approved" | "rejected";
+export type AttendanceExplanationStatus = "pending" | "approved" | "rejected" | "cancelled";
 export type AttendanceExplanationReason =
   | "late"
   | "early_leave"

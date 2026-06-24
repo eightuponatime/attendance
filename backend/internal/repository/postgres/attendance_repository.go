@@ -227,6 +227,37 @@ func (r *AttendanceRepository) UpsertExplanation(
 	return &row, nil
 }
 
+func (r *AttendanceRepository) CancelPendingExplanation(
+	ctx context.Context,
+	userId uuid.UUID,
+	explanationId uuid.UUID,
+) (*domain.AttendanceExplanation, error) {
+	const query = `
+		update attendance_explanations
+		set status = 'cancelled',
+			reviewed_by_admin_email = null,
+			reviewed_at = null,
+			review_note = null,
+			updated_at = now()
+		where id = $1
+			and user_id = $2
+			and status = 'pending'
+		returning id, user_id, business_date, reason_type, comment, status,
+			reviewed_by_admin_email, reviewed_at, review_note, created_at, updated_at
+	`
+
+	q := extractTransaction(ctx, r.db)
+	var row domain.AttendanceExplanation
+	if err := sqlx.GetContext(ctx, q, &row, query, explanationId, userId); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	return &row, nil
+}
+
 func (r *AttendanceRepository) ListExplanationsByUserRange(
 	ctx context.Context,
 	userId uuid.UUID,

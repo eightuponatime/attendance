@@ -380,6 +380,29 @@ func (s *AttendanceService) SubmitExplanation(
 	return s.rp.UpsertExplanation(ctx, normalized)
 }
 
+func (s *AttendanceService) CancelExplanation(
+	ctx context.Context,
+	userId uuid.UUID,
+	explanationId uuid.UUID,
+) (*domain.AttendanceExplanation, error) {
+	if userId == uuid.Nil {
+		return nil, fmt.Errorf("%w: user_id is empty", ErrInvalidAttendanceInput)
+	}
+	if explanationId == uuid.Nil {
+		return nil, fmt.Errorf("%w: explanation_id is empty", ErrInvalidAttendanceInput)
+	}
+
+	explanation, err := s.rp.CancelPendingExplanation(ctx, userId, explanationId)
+	if err != nil {
+		return nil, err
+	}
+	if explanation == nil {
+		return nil, ErrExplanationUnavailable
+	}
+
+	return explanation, nil
+}
+
 func (s *AttendanceService) normalizeExplanationInput(
 	input domain.CreateAttendanceExplanationInput,
 ) (domain.CreateAttendanceExplanationInput, error) {

@@ -15,6 +15,7 @@ import (
 	"attendance/internal/service/impl"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 )
 
 type AttendanceHandler struct {
@@ -43,6 +44,7 @@ func (h *AttendanceHandler) RegisterRoutes(r chi.Router) {
 	r.Post("/attendance/check-in", h.CheckIn)
 	r.Post("/attendance/check-out", h.CheckOut)
 	r.Post("/attendance/explanations", h.SubmitExplanation)
+	r.Delete("/attendance/explanations/{id}", h.CancelExplanation)
 }
 
 func (h *AttendanceHandler) Today(w http.ResponseWriter, r *http.Request) {
@@ -116,6 +118,28 @@ func (h *AttendanceHandler) SubmitExplanation(w http.ResponseWriter, r *http.Req
 		ReasonType:   request.ReasonType,
 		Comment:      request.Comment,
 	})
+	if err != nil {
+		h.writeAttendanceError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, newAttendanceExplanationResponse(*explanation))
+}
+
+func (h *AttendanceHandler) CancelExplanation(w http.ResponseWriter, r *http.Request) {
+	userID, ok := appMiddleware.UserIDFromContext(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+
+	explanationID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid explanation id"})
+		return
+	}
+
+	explanation, err := h.attendanceService.CancelExplanation(r.Context(), userID, explanationID)
 	if err != nil {
 		h.writeAttendanceError(w, err)
 		return

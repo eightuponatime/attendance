@@ -1,12 +1,7 @@
-backend/.env
-.env
-.agents
-.codex
-frontend/.agents
-frontend/.codex
-google_inst.txt
-adb.sh
-qr_maker.go
+.swm
 .swn
 .swo
 .swp
+.env
+.agents
+.codex
