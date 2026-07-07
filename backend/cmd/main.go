@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"attendance/config"
 	"attendance/internal/handler"
@@ -40,10 +41,21 @@ func main() {
 	cfg.LogConfig(log)
 
 	// ======== db connector ========
-	db, err := sqlx.Connect("postgres", cfg.DatabaseURL)
-	if err != nil {
-		log.Errorf("db connection failed: %v", err)
-		os.Exit(1)
+	var db *sqlx.DB
+	const dbConnectAttempts = 30
+	for attempt := 1; attempt <= dbConnectAttempts; attempt++ {
+		db, err = sqlx.Connect("postgres", cfg.DatabaseURL)
+		if err == nil {
+			break
+		}
+
+		if attempt == dbConnectAttempts {
+			log.Errorf("db connection failed after %d attempts: %v", dbConnectAttempts, err)
+			os.Exit(1)
+		}
+
+		log.Warnf("db connection failed, retrying: attempt=%d max_attempts=%d error=%v", attempt, dbConnectAttempts, err)
+		time.Sleep(2 * time.Second)
 	}
 	defer db.Close()
 	log.Info("database connected")
